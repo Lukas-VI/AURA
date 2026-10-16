@@ -1,0 +1,28 @@
+device = cuda | torch = 2.4.1+cu124
+训练集真实图: 800 | 配对样本: 400
+E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py:1160: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10/cuda/CUDAAllocatorConfig.h:28.)
+  return t.to(
+=== Stage 1: 无监督哈希学习 ===
+  [Stage1] epoch 1: loss_r=0.0691, loss_h=0.0602
+  [Stage1] epoch 2: loss_r=0.0676, loss_h=0.0000
+  [Stage1] epoch 3: loss_r=0.0674, loss_h=0.0000
+  [Stage1] epoch 4: loss_r=0.0669, loss_h=0.0000
+  [Stage1] epoch 5: loss_r=0.0670, loss_h=0.0000
+  [Stage1] epoch 6: loss_r=0.0668, loss_h=0.0000
+  [Stage1] epoch 7: loss_r=0.0665, loss_h=0.0000
+  [Stage1] epoch 8: loss_r=0.0666, loss_h=0.0000
+  [Stage1] epoch 9: loss_r=0.0664, loss_h=0.0000
+  [Stage1] epoch 10: loss_r=0.0666, loss_h=0.0000
+=== Stage 2: 弱监督（四元组 + 检测） ===
+  [Stage2] epoch 1: loss=2.4517, recon=0.0653, entropy=0.0000, quad=1.0000, cls=1.3864
+  [Stage2] epoch 2: loss=2.4516, recon=0.0653, entropy=0.0000, quad=1.0000, cls=1.3863
+  [Stage2] epoch 3: loss=2.4516, recon=0.0653, entropy=0.0000, quad=1.0000, cls=1.3863
+  [Stage2] epoch 4: loss=2.4517, recon=0.0654, entropy=0.0000, quad=1.0000, cls=1.3863
+  [Stage2] epoch 5: loss=2.4516, recon=0.0653, entropy=0.0000, quad=1.0000, cls=1.3863
+  [Stage2] epoch 6: loss=2.4515, recon=0.0652, entropy=0.0000, quad=1.0000, cls=1.3863
+  [Stage2] epoch 7: loss=2.4516, recon=0.0653, entropy=0.0000, quad=1.0000, cls=1.3863
+  [Stage2] epoch 8: loss=2.4516, recon=0.0653, entropy=0.0000, quad=1.0000, cls=1.3863
+  [Stage2] epoch 9: loss=2.4515, recon=0.0652, entropy=0.0000, quad=1.0000, cls=1.3863
+  [Stage2] epoch 10: loss=2.4516, recon=0.0653, entropy=0.0000, quad=1.0000, cls=1.3863
+模型已保存: D:\py\AURA\checkpoints/baseline.pth
+GPU 峰值显存: 2899.4 MB

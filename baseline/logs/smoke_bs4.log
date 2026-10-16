@@ -1,0 +1,8 @@
+device = cuda | torch = 2.4.1+cu124
+训练集真实图: 48 | 配对样本: 24
+=== Stage 1: 无监督哈希学习 ===
+  [Stage1] epoch 1: loss_r=0.0829, loss_h=0.6729
+=== Stage 2: 弱监督（四元组 + 检测） ===
+  [Stage2] epoch 1: loss=2.0334, recon=0.0776, entropy=0.5223, quad=0.5170, cls=1.3865
+模型已保存: D:\py\AURA\checkpoints/smoke.pth
+GPU 峰值显存: 2899.4 MB

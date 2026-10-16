@@ -1,0 +1,4 @@
+已保存: D:\py\AURA\results/smoke_loss_curve.png
+E:\conda\envs\pytorch\Lib\site-packages\umap\umap_.py:1952: UserWarning: n_jobs value 1 overridden to 1 by setting random_state. Use no seed for parallelism.
+  warn(
+已保存: D:\py\AURA\results/smoke_hash_manifold.png

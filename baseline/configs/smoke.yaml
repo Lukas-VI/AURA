@@ -1,0 +1,9 @@
+# 冒烟测试配置：极小规模，仅用于快速验证全流程能否跑通（不用于出结果）
+name: 'smoke'
+
+num_train_videos: 24
+num_val_videos: 6
+num_test_videos: 6
+
+epochs_stage1: 1
+epochs_stage2: 1

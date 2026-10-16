@@ -1,0 +1,46 @@
+# ============================================================
+# AURA .gitignore
+# 原则：只跟踪【代码 / 配置 / 文档 / 指标 json】。
+#       数据集与第三方权重体积巨大（data/ 1.09 GB + 402k 文件、third_party/ 954 MB）
+#       且各有独立许可（FF++ / CelebAMask-HQ / SimSwap 均禁止再分发），一律不进仓库。
+# ============================================================
+
+# ---------- Python 运行时产物 ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------- 虚拟环境 ----------
+.venv/
+venv/
+env/
+
+# ---------- 数据集与第三方权重（需按各自许可自行获取，见 README 第 6 节） ----------
+/data/
+/third_party/
+
+# ---------- 训练产物、缓存与日志 ----------
+# BiSeNet 解析掩膜缓存（*.npy，万级文件）
+baseline/cache/
+# 模型权重（history JSON 仍会被跟踪）
+*.pth
+# 忽略 tensorboard 二进制事件文件，保留文本训练日志
+baseline/logs/*
+!baseline/logs/*.log
+runs/
+dumps/
+
+# ---------- 可视化图（内含数据集人脸图像，不随仓库分发） ----------
+baseline/results/*.png
+
+# ---------- 编辑器 / 系统 ----------
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
+baseline/cache/masks/554566330270611320ec540bd342bb6e.npy

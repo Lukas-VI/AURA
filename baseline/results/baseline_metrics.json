@@ -1,0 +1,10 @@
+{
+  "checkpoint": "D:\\py\\AURA\\baseline\\checkpoints/baseline.pth",
+  "retrieval_bg_top1": 0.005,
+  "retrieval_bg_top5": 0.0245,
+  "retrieval_full_top1": 0.007625,
+  "retrieval_full_top5": 0.033625,
+  "AUC": 0.5078105859375,
+  "ACC": 0.7964583333333334,
+  "num_query": 8000
+}

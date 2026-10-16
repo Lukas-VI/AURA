@@ -1,0 +1,13 @@
+device = cuda | torch = 2.4.1+cu124
+[data] train: 24 个视频 -> 24 张真实 + 120 张伪造（5 种篡改算法）
+[data] val: 6 个视频 -> 6 张真实 + 30 张伪造（5 种篡改算法）
+[data] test: 6 个视频 -> 6 张真实 + 30 张伪造（5 种篡改算法）
+训练集样本: 144 张（含真实+伪造）| 四元组样本: 120
+E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py:1160: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10/cuda/CUDAAllocatorConfig.h:28.)
+  return t.to(
+=== Stage 1: 无监督哈希学习 ===
+  [Stage1] epoch 1: loss_r=0.1732, loss_h=0.3551, loss_b=0.0000 | hash[min=0.102, max=0.894, mean=0.499, bit_dev=0.001]
+=== Stage 2: 弱监督（四元组 + 检测，伪造图来自 FF++） ===
+  [Stage2] epoch 1: loss=2.3149, recon=0.1663, entropy=0.4274, balance=0.0000, quad=0.7169, cls=1.3890
+模型已保存: D:\py\AURA\baseline\checkpoints/smoke.pth
+GPU 峰值显存: 1637.3 MB

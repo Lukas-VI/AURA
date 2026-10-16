@@ -1,0 +1,56 @@
+已加载权重: checkpoints/smoke.pth
+[crop] offset= 0 -> Top-5 = 0.2917
+[crop] offset= 5 -> Top-5 = 0.2917
+[crop] offset=10 -> Top-5 = 0.2917
+[crop] offset=20 -> Top-5 = 0.2917
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\py\AURA\analysis\diagnose.py", line 210, in <module>
+    main()
+  File "D:\py\AURA\analysis\diagnose.py", line 199, in main
+    "background_sensitivity": exp_background_sensitivity(model, test_ds, device),
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\analysis\diagnose.py", line 125, in exp_background_sensitivity
+    h0 = _encode(model, orig, device)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\analysis\diagnose.py", line 74, in _encode
+    _, hash_code, _, _ = model(batch)
+                         ^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\models\hashvae.py", line 25, in forward
+    hash_feat = self.encoder(x)              # 连续哈希特征
+                ^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\models\encoder.py", line 125, in forward
+    fused = self.aff(features)         # 注意力融合
+            ^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\models\encoder.py", line 76, in forward
+    adjusted = [F.interpolate(a, size=target_size, mode="bilinear", align_corners=False)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\models\encoder.py", line 76, in <listcomp>
+    adjusted = [F.interpolate(a, size=target_size, mode="bilinear", align_corners=False)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\functional.py", line 4087, in interpolate
+    return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 8.00 GiB. GPU 0 has a total capacity of 4.00 GiB of which 0 bytes is free. Of the allocated memory 11.63 GiB is allocated by PyTorch, and 553.19 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

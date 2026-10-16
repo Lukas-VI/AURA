@@ -1,0 +1,84 @@
+已加载权重: checkpoints/smoke.pth
+[crop] offset= 0 -> Top-5 = 0.2917
+[crop] offset= 5 -> Top-5 = 0.2917
+[crop] offset=10 -> Top-5 = 0.2917
+[crop] offset=20 -> Top-5 = 0.2917
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\py\AURA\analysis\diagnose.py", line 206, in <module>
+    main()
+  File "D:\py\AURA\analysis\diagnose.py", line 195, in main
+    "background_sensitivity": exp_background_sensitivity(model, test_ds, device),
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\analysis\diagnose.py", line 121, in exp_background_sensitivity
+    h0 = _encode(model, orig, device)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\analysis\diagnose.py", line 71, in _encode
+    _, hash_code, _, _ = model(img)
+                         ^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\models\hashvae.py", line 25, in forward
+    hash_feat = self.encoder(x)              # 连续哈希特征
+                ^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\models\encoder.py", line 121, in forward
+    x = mb(x)                      # 多分支残差提取
+        ^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\models\encoder.py", line 50, in forward
+    out = branch(x + prev)                            # 融合前分支信息再送进当前分支
+          ^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\container.py", line 219, in forward
+    input = module(input)
+            ^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\py\AURA\models\encoder.py", line 22, in forward
+    out = self.act(self.conv1(x))       # 卷积 + 激活
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\activation.py", line 799, in forward
+    return F.leaky_relu(input, self.negative_slope, self.inplace)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\conda\envs\pytorch\Lib\site-packages\torch\nn\functional.py", line 1677, in leaky_relu
+    result = torch._C._nn.leaky_relu(input, negative_slope)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: CUDA error: out of memory
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+

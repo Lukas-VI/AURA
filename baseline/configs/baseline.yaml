@@ -1,0 +1,13 @@
+# 基线实验配置（覆盖 default.yaml 中的同名键）
+# 第一阶段：复现 HashVAE 简化版，建立主动检索基线。
+# 数据：FF++ C23 抽帧（D:/ffpp_frames），伪造样本直接用真实换脸算法生成的帧。
+name: 'baseline'
+
+# 4GB 显存下的预算（frames_per_video=8，300 训练视频）：
+#   stage1 ≈3600 步/epoch（≈11 min）、stage2 ≈6000 步/epoch（≈38 min），3+3 epoch ≈2.4 h
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+
+epochs_stage1: 3
+epochs_stage2: 3

@@ -1,0 +1,21 @@
+{
+  "crop_dependency": {
+    "offset_0": 0.122,
+    "offset_5": 0.125,
+    "offset_10": 0.12,
+    "offset_20": 0.109
+  },
+  "background_sensitivity": {
+    "blur": 1.131371027440764e-05,
+    "color": 4.317093849182129,
+    "jpeg": 1.131371027440764e-05
+  },
+  "face_sensitivity": {
+    "faceswap": 1.131371027440764e-05
+  },
+  "frequency_sensitivity": {
+    "low": 1.131371027440764e-05,
+    "mid": 5.500004768371582,
+    "high": 5.500004768371582
+  }
+}

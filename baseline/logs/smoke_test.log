@@ -1,0 +1,6 @@
+测试集：真实 24 张（数据库），伪造 24 张（查询）
+已加载权重: checkpoints/smoke.pth
+Top-1 检索准确率: 0.0417
+Top-5 检索准确率: 0.2917
+AUC: 0.4757, ACC: 0.5000
+指标已保存: D:\py\AURA\results/smoke_metrics.json

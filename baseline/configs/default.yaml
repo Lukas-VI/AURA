@@ -1,0 +1,69 @@
+# 默认超参数（所有实验共享），baseline.yaml 会覆盖其中部分键
+# ---------- 数据 ----------
+data_root: 'D:/ffpp_frames'                        # FF++ C23 抽帧结果（256x256 人脸裁剪）
+manifest: 'manifest.csv'                           # 抽帧清单（相对 data_root，或写绝对路径）
+real_folder: 'original'                            # 真实视频文件夹
+# 伪造视频文件夹（命名 X_Y：背景来自 original/X，人脸来自 original/Y）
+manipulations: ['Deepfakes', 'Face2Face', 'FaceSwap', 'NeuralTextures', 'FaceShifter']
+frames_per_video: 8                                # 每个视频取前 N 帧（盘上现成 8 帧；实测每视频 1 帧
+                                                   # 时真假信号无法泛化，取满 8 帧后小 CNN 的 test AUC
+                                                   # 从 0.51 升到 0.63）
+num_train_videos: 300                              # 按【真实视频编号】切分，避免检索答案泄漏
+num_val_videos: 100
+num_test_videos: 200
+image_size: 128                                    # 模型输入尺寸
+seed: 42                                            # 随机种子（保证可复现）
+
+# ---------- 模型 ----------
+hash_dim: 128            # 总哈希码长度（论文 C=C_f+C_b，前后景各占一半=64 位）
+base_channels: 32        # 基础通道数（4GB 显存的 RTX 2050 上从 64 降到 32）
+num_branches: 2          # 多分支块分支数（论文 M=5，简化版 2）
+num_rb: 2                # 每个分支内残差块数量（论文 D=5，简化版 2）
+num_scales: 2            # 多尺度数量
+aff_channels: 256        # 注意力融合输出通道（4GB 显存下从 512 降到 256）
+# 前后景掩膜来源：'parse' = BiSeNet 人脸解析（真实人脸区域，默认）
+#                 'geometry' = 居中羽化椭圆先验（消融对照；也是解析失败时的兜底）
+fg_mask_source: 'parse'
+mask_cache_dir: 'cache/masks'  # 解析掩膜磁盘缓存目录（相对 baseline 包目录）
+fg_center_ratio: [0.50, 0.62]  # 'geometry' 掩膜（及模型内置兜底掩膜）的中心先验框占比
+fg_expand: 1.0                 # 'geometry' 掩膜的椭圆放大系数
+
+# ---------- 训练 ----------
+# RTX 2050 仅 4GB 显存。实测本模型在 128x128 下激活约 1.1GB/样本，且 batch 太小会拖垮
+# 编码器末端的 BatchNorm1d（batch=2 时统计量噪声过大，stage1 哈希实测会向常量坍缩：
+# 取值范围从 [0.01,0.99] 缩到 [0.02,0.47]）。因此按阶段分别设 batch：
+#   batch_size        = 4 -> 阶段1/评估（只保留 1 张计算图，峰值 ~1.6GB）✔
+#   stage2_batch_size = 2 -> 阶段2（同时保留 q 与 q+2 两张图，batch 4 峰值 ~4.7GB 会溢出到
+#                            共享内存，单步从 0.9s 掉到 7s）✔
+# 若换回 22GB 的 2080Ti，可把两者都调回 64、base_channels 64、aff_channels 512（论文原始设置）。
+batch_size: 4
+stage2_batch_size: 2
+lr: 0.0003                # 文档为 1e-4；旧 cage/trump 数据需 1e-3 才能逃出坍缩，
+                          # 换成 FF++ 后 1e-3 过大（哈希熵损失在 Tanh 上饱和、训练震荡并重新坍缩），
+                          # 实测 3e-4 时 stage1 的 loss_h 单调下降、哈希取值范围稳定在 [0.003,0.996]。
+epochs_stage1: 5
+epochs_stage2: 5
+weight_decay: 0.0
+num_workers: 0           # Windows 下必须为 0，避免共享内存问题
+device: 'auto'           # auto -> 有 GPU 用 GPU，否则 CPU
+
+# ---------- 损失权重 ----------
+lambda_recon: 1.0
+lambda_entropy: 0.1
+lambda_balance: 0.1      # 比特平衡权重，防止哈希坍缩（新增项）
+lambda_quadruplet: 1.0
+lambda_detection: 1.0
+margin_fg: 0.5           # 四元组前景项 margin（论文 α=0.5）
+margin_bg: 0.5           # 四元组背景项 margin（论文 β=0.5）
+
+# ---------- 优化器 / 调度 ----------
+optimizer: 'adam'
+betas: [0.9, 0.99]
+scheduler: 'step'
+step_size: 5
+gamma: 0.5
+
+# ---------- 保存 / 日志 ----------
+save_dir: 'checkpoints/'
+log_dir: 'logs/'
+save_freq: 10

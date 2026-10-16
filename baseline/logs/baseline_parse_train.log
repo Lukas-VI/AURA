@@ -1,0 +1,49 @@
+[override] name = baseline_parse
+device = cuda (NVIDIA GeForce RTX 2080 Ti) | torch = 2.4.1+cu124
+[data] train: 300 个视频 -> 2400 张真实 + 12000 张伪造（5 种篡改算法）
+[data] val: 100 个视频 -> 800 张真实 + 4000 张伪造（5 种篡改算法）
+[data] test: 200 个视频 -> 1600 张真实 + 8000 张伪造（5 种篡改算法）
+  [mask-cache] 500/14944
+  [mask-cache] 1000/14944
+  [mask-cache] 1500/14944
+  [mask-cache] 2000/14944
+  [mask-cache] 2500/14944
+  [mask-cache] 3000/14944
+  [mask-cache] 3500/14944
+  [mask-cache] 4000/14944
+  [mask-cache] 4500/14944
+  [mask-cache] 5000/14944
+  [mask-cache] 5500/14944
+  [mask-cache] 6000/14944
+  [mask-cache] 6500/14944
+  [mask-cache] 7000/14944
+  [mask-cache] 7500/14944
+  [mask-cache] 8000/14944
+  [mask-cache] 8500/14944
+  [mask-cache] 9000/14944
+  [mask-cache] 9500/14944
+  [mask-cache] 10000/14944
+  [mask-cache] 10500/14944
+  [mask-cache] 11000/14944
+  [mask-cache] 11500/14944
+  [mask-cache] 12000/14944
+  [mask-cache] 12500/14944
+  [mask-cache] 13000/14944
+  [mask-cache] 13500/14944
+  [mask-cache] 14000/14944
+  [mask-cache] 14500/14944
+  [mask-cache] 14944/14944
+前景掩膜来源: parse（缓存已就绪）
+训练集样本: 14400 张（含真实+伪造）| 四元组样本: 12000 | batch: stage1=4, stage2=2
+E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py:1160: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10/cuda/CUDAAllocatorConfig.h:28.)
+  return t.to(
+=== Stage 1: 无监督哈希学习 ===
+  [Stage1] epoch 1: loss_r=0.0956, loss_h=0.3329, loss_b=0.0055 | hash[min=0.001, max=0.998, mean=0.497, bit_dev=0.033]
+  [Stage1] epoch 2: loss_r=0.0709, loss_h=0.2122, loss_b=0.0116 | hash[min=0.000, max=1.000, mean=0.496, bit_dev=0.048]
+  [Stage1] epoch 3: loss_r=0.0651, loss_h=0.1537, loss_b=0.0146 | hash[min=0.000, max=1.000, mean=0.498, bit_dev=0.050]
+=== Stage 2: 弱监督（四元组 + 检测，伪造图来自 FF++） ===
+  [Stage2] epoch 1: loss=4.2622, recon=0.1376, entropy=0.0445, balance=0.0088, quad=2.7313, cls=1.3880
+  [Stage2] epoch 2: loss=3.8799, recon=0.1408, entropy=0.0482, balance=0.0085, quad=2.3468, cls=1.3867
+  [Stage2] epoch 3: loss=3.0086, recon=0.1260, entropy=0.0517, balance=0.0085, quad=1.4911, cls=1.3855
+模型已保存: D:\py\AURA\baseline\checkpoints/baseline_parse.pth
+GPU 峰值显存: 1871.8 MB

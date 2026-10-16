@@ -1,0 +1,10 @@
+{
+  "checkpoint": "D:\\py\\AURA\\baseline\\checkpoints/smoke/smoke.pth",
+  "retrieval_bg_top1": 0.22916666666666666,
+  "retrieval_bg_top5": 0.7208333333333333,
+  "retrieval_full_top1": 0.25833333333333336,
+  "retrieval_full_top5": 0.7666666666666667,
+  "AUC": 0.5072048611111111,
+  "ACC": 0.7222222222222222,
+  "num_query": 240
+}

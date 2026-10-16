@@ -1,0 +1,21 @@
+device = cuda | torch = 2.4.1+cu124
+[data] train: 300 个视频 -> 300 张真实 + 1500 张伪造（5 种篡改算法）
+[data] val: 100 个视频 -> 100 张真实 + 500 张伪造（5 种篡改算法）
+[data] test: 200 个视频 -> 200 张真实 + 1000 张伪造（5 种篡改算法）
+训练集样本: 1800 张（含真实+伪造）| 四元组样本: 1500 | batch: stage1=4, stage2=2
+E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py:1160: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10/cuda/CUDAAllocatorConfig.h:28.)
+  return t.to(
+=== Stage 1: 无监督哈希学习 ===
+  [Stage1] epoch 1: loss_r=0.1537, loss_h=0.4089, loss_b=0.0018 | hash[min=0.020, max=0.980, mean=0.500, bit_dev=0.007]
+  [Stage1] epoch 2: loss_r=0.1505, loss_h=0.3752, loss_b=0.0026 | hash[min=0.012, max=0.988, mean=0.499, bit_dev=0.014]
+  [Stage1] epoch 3: loss_r=0.1502, loss_h=0.3471, loss_b=0.0036 | hash[min=0.008, max=0.991, mean=0.497, bit_dev=0.020]
+  [Stage1] epoch 4: loss_r=0.1500, loss_h=0.3217, loss_b=0.0042 | hash[min=0.005, max=0.994, mean=0.497, bit_dev=0.018]
+  [Stage1] epoch 5: loss_r=0.1497, loss_h=0.3008, loss_b=0.0050 | hash[min=0.003, max=0.996, mean=0.501, bit_dev=0.016]
+=== Stage 2: 弱监督（四元组 + 检测，伪造图来自 FF++） ===
+  [Stage2] epoch 1: loss=2.4985, recon=0.1536, entropy=0.1670, balance=0.0000, quad=0.9408, cls=1.3874
+  [Stage2] epoch 2: loss=1.9955, recon=0.1520, entropy=0.1687, balance=0.0000, quad=0.4395, cls=1.3871
+  [Stage2] epoch 3: loss=3.2015, recon=0.1539, entropy=0.1706, balance=0.0000, quad=1.6448, cls=1.3857
+  [Stage2] epoch 4: loss=2.1893, recon=0.1521, entropy=0.1729, balance=0.0001, quad=0.6340, cls=1.3859
+  [Stage2] epoch 5: loss=2.9501, recon=0.1528, entropy=0.1754, balance=0.0001, quad=1.3938, cls=1.3859
+模型已保存: D:\py\AURA\baseline\checkpoints/baseline.pth
+GPU 峰值显存: 1637.3 MB

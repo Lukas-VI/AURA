@@ -1,0 +1,4 @@
+# 掩膜消融实验：把前后景掩膜从"几何椭圆"换成"BiSeNet 人脸解析"（其余全部继承 default.yaml）
+# 单独建这个文件是为了让产物（权重/指标）落到 baseline_parse 名下，
+# 不覆盖旧几何椭圆基线（name: 'baseline'）的读数。
+name: 'baseline_parse'

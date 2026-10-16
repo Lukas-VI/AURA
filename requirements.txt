@@ -1,0 +1,14 @@
+# AURA 基线复现依赖
+# 说明：本环境已使用 E:\conda\envs\pytorch（torch 2.4.1+cu124 / cv2 5.0.0）
+torch>=1.9
+torchvision
+numpy
+opencv-python
+Pillow
+scikit-learn
+umap-learn
+matplotlib
+tqdm
+tensorboard
+pyyaml
+kagglehub   # 通过 Kaggle 下载 FF++ 等数据集（可选，见 README 第 6 节）
