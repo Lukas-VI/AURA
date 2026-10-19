@@ -1,0 +1,70 @@
+# AURA 自建单编码器 · 全图对比学习（全量规格）· J 轮：冻结 backbone，只训空间头
+# 用法（项目根目录 d:\py\AURA 下）：
+#   E:\conda\envs\pytorch\python.exe -m aura.train --config aura/configs/aura_full_spatial_j.yaml
+#
+# 动机（H/I 两轮读数的直接结论）：
+#   H（lr 5e-5）与 I（lr 2e-5）两轮独立实验都呈现同一种模式——e1 最高、之后单调回落
+#   （H：58.45→53.20→52.21；I：59.67→58.71→57.86）。把 lr 减半+warmup 加倍只把跌幅从
+#   -5.25pp 压到 -0.9pp，没有消除趋势 ⇒ 说明根因不是超参，而是 SupCon(基于 XBM 队列)在队列
+#   灌满 4096 后负样本陡增，梯度持续侵蚀空间头保留下来的低层空间布局（那正是 59.67% 的来源）。
+#   J 轮用一个最便宜的决定性实验验证该诊断：从 I 轮 best（59.67%）权重出发，冻结 backbone
+#   （requires_grad=False + 强制 eval），只训 pool+head。可训参数从 ~16M 降到 ~1M，
+#   SupCon 的梯度再也回不到 backbone，无法破坏其空间特征；head 只负责"如何把冻结特征读成
+#   判别嵌入"。若 clean 能过 60.05%（零训练 r8_norm），"深度 ≥ 纯 CV"的叙事即完全闭环。
+name: 'aura_full_spatial_j'
+
+# ---------- 数据 ----------
+image_size: 256
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（架构与 I 轮完全一致，不动） ----------
+embed_dim: 2048
+base_channels: 64
+num_branches: 5
+num_rb: 5
+num_scales: 2
+aff_channels: 512
+grad_checkpoint: false     # 22GB 显存富余，关掉换回 ~25-30% 算力
+
+spatial_head: true
+pool_grid: 8
+
+# ---------- 冻结实验（J 轮核心）----------
+freeze_backbone: true      # 冻结 backbone，只训 pool+head（train.py 会另把冻结段强制 eval）
+init_ckpt: 'D:/py/AURA/aura/runs/aura_full_spatial_i_best.pth'   # 从 I 轮 best（59.67%）出发
+
+# ---------- 对比学习 ----------
+groups_per_batch: 2
+samples_per_group: 2
+queue_size: 1024           # 从 4096 减到 1024：缓解队列灌满时负样本陡增对特征的冲击
+label_key: 'source_id'
+tau: 0.2
+lambda_vicreg: 1.0
+
+# ---------- 人脸掩膜擦除（关闭）----------
+erase_prob: 0.0
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'
+use_multiscale_skip: false
+
+# ---------- 训练 ----------
+steps_per_epoch: 800
+epochs: 1                  # 只训 1 轮即可判定（head-only，收敛快）
+lr: 0.0001                 # head-only：参数少、从预训练出发，可用更大 lr
+lr_schedule: 'constant'    # 恒定 lr（不做余弦退火）
+weight_decay: 0.0001
+warmup_ratio: 0.0          # 恒定模式下 warmup 无实际作用
+amp: false
+cudnn_benchmark: false
+clip_grad_norm: 5.0
+num_workers: 0
+eval_batch_size: 4
+log_interval: 20
+eval_every_epoch: 1
+degradation_eval: 'none'
+
+# ---------- 保存 / 日志 ----------
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'

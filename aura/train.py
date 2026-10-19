@@ -96,6 +96,10 @@ def train_one_epoch(model, sampler, train_loader, optimizer, scheduler, cfg, dev
                     epoch, queue_z, queue_labels, proj=None, writer=None):
     """单阶段对比学习：SupCon（+跨批内存） + 方差铰链（+可选低层蒸馏）。fp32 前向 + 梯度裁剪 + 坏批丢弃。"""
     model.train()
+    if bool(cfg.get("freeze_backbone", False)):     # 冻结部分强制 eval：BN 走 running stats，既不回传也不漂移
+        for name, m in model.named_children():
+            if name not in ("pool", "head"):
+                m.eval()
     sampler.set_epoch(epoch)
     tau = float(cfg.get("tau", 0.1))
     q_size = int(cfg.get("queue_size", 0))
@@ -227,6 +231,22 @@ def main():
     n_param = sum(p.numel() for p in model.parameters())
     print(f"模型参数量 {n_param / 1e6:.2f} M | embed_dim={cfg['embed_dim']} image_size={cfg['image_size']}")
 
+    # J 轮冻结实验：从已训好的权重初始化，再冻结 backbone（只训 pool+head）。
+    # 动机：H/I 两轮都"e1 最高、之后回落"，说明 SupCon+XBM 的梯度在持续侵蚀空间头保存的低层布局。
+    # 掐断 backbone 的梯度回传后，只让 head 学"如何把冻结的空间特征读成判别嵌入"，就不会再破坏它。
+    if cfg.get("init_ckpt"):
+        init_path = os.path.abspath(str(cfg["init_ckpt"]))
+        model.load_state_dict(torch.load(init_path, map_location=device))
+        print(f"[init] 从 {init_path} 载入权重")
+    if bool(cfg.get("freeze_backbone", False)):
+        for p in model.parameters():
+            p.requires_grad_(False)
+        for m in (model.pool, model.head):
+            for p in m.parameters():
+                p.requires_grad_(True)
+        n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"[freeze] 冻结 backbone，仅训 pool+head：可训参数 {n_train / 1e6:.3f} M")
+
     # 低层蒸馏的投影头（路线 A）：仅训练期辅助分支，不进 checkpoint —— 评估脚本按 E 轮的
     # 结构加载主权重时不会遇到多余的键；检索路径也完全不走它。
     proj = None
@@ -241,7 +261,7 @@ def main():
               f" | 投影头 {cfg['embed_dim']}→{d_h}→{d_t}"
               f"（{sum(p.numel() for p in proj.parameters()) / 1e3:.1f}K 参数，辅助分支，不进 checkpoint）")
 
-    params = list(model.parameters()) + (list(proj.parameters()) if proj is not None else [])
+    params = [p for p in model.parameters() if p.requires_grad] + (list(proj.parameters()) if proj is not None else [])
     optimizer = torch.optim.AdamW(params, lr=float(cfg["lr"]),
                                   betas=tuple(cfg.get("betas", [0.9, 0.999])),
                                   weight_decay=float(cfg.get("weight_decay", 1e-4)))
@@ -249,7 +269,11 @@ def main():
     total_steps = max(1, epochs * len(train_loader))
     warmup = max(1, int(float(cfg.get("warmup_ratio", 0.05)) * total_steps))
 
+    constant_lr = str(cfg.get("lr_schedule", "cosine")) == "constant"
+
     def lr_lambda(step):
+        if constant_lr:                                    # J 轮：恒定 lr，不做余弦退火
+            return 1.0
         if step < warmup:
             return step / warmup
         p = (step - warmup) / max(1, total_steps - warmup)
