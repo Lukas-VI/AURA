@@ -12,6 +12,7 @@
 """
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 
 from baseline.models.encoder import AttentionFeatureFusion, MultiBranchBlock
@@ -147,3 +148,28 @@ class SourceEncoder(nn.Module):
             spatial_head=bool(cfg.get("spatial_head", False)),
             pool_grid=int(cfg.get("pool_grid", 8)),
         )
+
+
+class LocalDescriptor(nn.Module):
+    """轻量局部描述子网络（路线 1b）：整图 -> 逐位置 L2 归一化描述子 (B,D,H/8,W/8)。
+
+    动机：路线 1 最小原型证实"可微几何验证模块"梯度可回传（Q2 过），但复用整图对比学习编码器
+    的 feature map 做密集匹配时【匹配极度弥散】（锐度×N≈17~20），几何分数不判别（AUC≈0.39<随机）。
+    根因是全局编码器只被训成"输出一个向量"，其特征在空间上平滑、不为逐位置对应优化。
+
+    这里改为【自己训练】一个对应型局部描述子：用已知的随机几何变换做稠密自监督（InfoNCE），
+    让"变换前后对应位置的描述子互相靠近、非对应位置互相远离"，再把它的特征图喂给同一个可微
+    几何验证模块。默认三层 stride=2，共降采样 8×（256px -> 32×32 网格），与验证模块的坐标网格对齐。
+    """
+
+    def __init__(self, in_ch: int = 3, dim: int = 32, width: int = 32, depth: int = 3):
+        super().__init__()
+        layers, c = [], in_ch
+        for _ in range(depth):                          # 每层 stride=2 -> 总步长 2**depth（默认 8）
+            layers += [nn.Conv2d(c, width, 3, stride=2, padding=1), nn.LeakyReLU(0.1)]
+            c = width
+        layers += [nn.Conv2d(c, dim, 1)]                # 1×1 投到描述子维
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return F.normalize(self.net(x.float()), dim=1)  # 逐位置通道 L2 归一化

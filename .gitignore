@@ -31,7 +31,9 @@ baseline/cache/
 # 忽略 tensorboard 二进制事件文件，保留文本训练日志
 baseline/logs/*
 !baseline/logs/*.log
-runs/
+# runs/ 下只跟踪【脚本代码】，忽略权重(*.pth)/指标 json/日志/tb 等运行产物
+**/runs/*
+!**/runs/*.py
 dumps/
 
 # ---------- 可视化图（内含数据集人脸图像，不随仓库分发） ----------
