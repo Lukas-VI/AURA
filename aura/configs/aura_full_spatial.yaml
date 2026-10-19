@@ -1,0 +1,67 @@
+# AURA 自建单编码器 · 全图对比学习（全量规格）· H 轮：空间保留嵌入头（去 GAP）
+# 用法（项目根目录 d:\py\AURA 下）：
+#   E:\conda\envs\pytorch\python.exe -m aura.train --config aura/configs/aura_full_spatial.yaml
+# 本文件在 aura_full.yaml（E 轮）之上只改一处架构：去掉嵌入头的 GAP。
+# 依据（docs/AURA_HANDOFF.md §3.8/§3.9，已由零训练手工描述子扫描坐实）：
+#   瓶颈是 GAP 的空间压缩 —— pool 段末尾的 AdaptiveAvgPool2d(1) 把 AFF 的 256×256×512
+#   空间图压成 1 个均值（65536:1 的多对一满射），空间排列归零。而本协议下最强的零训练
+#   描述子 r8_norm（8×8 逐图标准化缩略图，帧级 60.05%）恰恰靠这条【粗空间布局】取胜。
+#   五轮（A 47.75 / D 46.91 / E 46.44 / F 37.80 / G 47.04）+ §3.4 低层拼接零增益已穷尽
+#   验证：调参补不上，只能改架构。H 轮把 GAP 换成 8×8 空间网格（8×8×32=2048），与 r8_norm
+#   的网格同构但为可学表征。其余逐项等于 E 轮，保证"仅架构"为单变量。
+name: 'aura_full_spatial'
+
+# ---------- 数据 ----------
+image_size: 256            # 全量规格（256px）
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（论文原设 + 单编码器） ----------
+embed_dim: 2048            # 全量规格码长（对应论文 hash 2048 位）
+base_channels: 64
+num_branches: 5            # 论文 M=5
+num_rb: 5                  # 论文 D=5
+num_scales: 2
+aff_channels: 512
+# 梯度检查点：前向不存中间激活、反向重算。必须开 —— 256px 全规格下 M=5×D=5 的多分支
+# 残差块激活是显存大头，实测（batch 4）关掉反向峰值 17.0GB、开着 7.6GB。
+grad_checkpoint: true
+
+# ---------- 空间保留嵌入头（H 轮唯一变量）----------
+spatial_head: true         # 去 GAP：pool 段改为 1×1 卷积降到 grid_ch -> 池化到 8×8 -> 展平
+pool_grid: 8               # 网格边长；输出维度 = grid_ch × 8² = embed_dim（即 grid_ch=32）
+                           # 与 r8_norm 的 8×8 网格同构（每格 32px 覆盖），但这里是可学的多通道表征
+
+# ---------- 对比学习 ----------
+groups_per_batch: 2        # 每批 2 个分组单元（label_key=source_id 时每单元 = 一个源帧）
+samples_per_group: 2       # 每单元 2 张 -> batch = 4
+queue_size: 4096           # 跨批内存队列（XBM），小 batch 靠它凑负样本
+label_key: 'source_id'     # 与 E 轮一致：细粒度，与帧级判据对齐
+tau: 0.2
+lambda_vicreg: 1.0
+
+# ---------- 人脸掩膜擦除（关闭）----------
+erase_prob: 0.0
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'
+use_multiscale_skip: false # 保持关闭：让"去 GAP"成为单变量
+
+# ---------- 训练 ----------
+steps_per_epoch: 800
+epochs: 6
+lr: 0.00005                # 与 E 轮一致
+weight_decay: 0.0001
+warmup_ratio: 0.2
+amp: false
+cudnn_benchmark: false     # 关键：避免 cuDNN 调优瞬时 workspace 把峰值抬到 18.8GB
+clip_grad_norm: 5.0
+num_workers: 0             # Windows 下必须为 0
+eval_batch_size: 4         # 评估前向无梯度检查点，batch 必须小
+log_interval: 20
+eval_every_epoch: 1
+degradation_eval: 'none'   # 六档光度与七档几何都改用 aura/runs/_eval_geom_model.py 单独跑
+
+# ---------- 保存 / 日志（绝对路径，落在 aura/ 下） ----------
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'

@@ -1,0 +1,102 @@
+# AURA 自建单编码器 · 全图对比学习（全量规格）· G 轮：低层蒸馏（路线 A）
+# 用法（项目根目录 d:\py\AURA 下）：
+#   E:\conda\envs\pytorch\python.exe -m aura.train --config aura/configs/aura_full_distill.yaml
+# 本文件在 aura_full.yaml（E 轮）之上只加蒸馏项；路径用绝对路径，避免落到 baseline/ 下。
+name: 'aura_full_distill'     # 路线 A：把零训练"手工描述子的判别结构"蒸馏进主干。
+                              # 依据（2026-10-18 手工描述子扫描，见 runs/probe_protocol_ceiling.json）：
+                              #   58.71%（tiny32）不是协议天花板 —— r8_norm（8×8 逐图标准化缩略图，
+                              #   仅 192 维）帧级 Top-1 = 60.05%，融合 r32_norm+4*huehsv = 60.62%。
+                              #   分辨率甜点是 8px（4→58.61 / 8→60.02 / 16→59.41 / 32→58.71 / 64→58.06），
+                              #   即帧级线索在【最粗粒度的低频带】里；而自建模型 12.82M 参数、
+                              #   2048 维嵌入只有 46.45%，连 192 维的 8px 缩略图都打不过。
+                              #   故在主干（共享特征）上挂一个 2048→192 的投影头，用余弦损失逼它对齐
+                              #   r8_norm 教师；【检索仍用 2048 维主嵌入】，投影头只是训练期辅助分支
+                              #   （不进 checkpoint），以免学生上限被人为压在 60.05%。
+                              # 其余与 E 轮逐项相同：label_key=source_id、lr 5e-5、warmup 0.2、擦除关、
+                              # 跳连关、几何增强关、6 轮 × 800 步。
+
+# ---------- 数据 ----------
+image_size: 256            # 全量规格（256px）
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（论文原设 + 单编码器） ----------
+embed_dim: 2048            # 全量规格码长（对应论文 hash 2048 位）
+base_channels: 64
+num_branches: 5            # 论文 M=5
+num_rb: 5                  # 论文 D=5
+num_scales: 2
+aff_channels: 512
+# 梯度检查点：前向不存中间激活、反向重算。必须开 —— 256px 全规格下 M=5×D=5 的多分支
+# 残差块激活是显存大头，实测（batch 4）关掉反向峰值 17.0GB、开着 7.6GB。
+grad_checkpoint: true
+
+# ---------- 对比学习 ----------
+# 显存实测（256px 全规格、fp32、batch 4）：前向峰值 4.0GB / 反向峰值 7.6GB。
+# 之前"爆显存"的真正原因是 cuDNN benchmark 自动调优卷积算法时瞬时分配的超大 workspace
+# （把启动峰值抬到 18.8GB、占卡 83%），已由 cudnn_benchmark=false 关掉；模型本身并不大
+# （12.81M 参数，显存大头在卷积激活）。
+groups_per_batch: 2        # 每批取 2 个【分组单元】。分组键由 data.label_key 决定：
+                           #   identity  -> 每单元 = 一个源视频 X（粗粒度，同视频 8 帧互为正样本）
+                           #   source_id -> 每单元 = 一个具体源帧 X_f{帧号}（细粒度；每单元共 6 张：
+                           #                1 张真实帧 + 5 种换脸算法各 1 张，背景逐像素相同、人脸不同）
+samples_per_group: 2       # 每个单元取 2 张 -> batch = 4（细粒度下每锚点恰有 1 个正样本）
+queue_size: 4096           # 跨批内存队列：小 batch 靠它凑出数千个负样本（XBM）。注意队列里
+                           # 每个源出现次数 = 4096 / 类别数：粗粒度 300 类时 ~13 次（正样本管够），
+                           # 细粒度 2400 类时只有 ~1.7 次 —— 细粒度下正样本几乎全靠批内那 1 对。
+label_key: 'source_id'     # 方案 (a)：细粒度，同视频其余 7 帧从"正样本"变"负样本"，与帧级判据对齐。
+                           # 代价：同视频相邻帧是"近乎相同"的极难负样本，可能造成梯度不稳 —— 故
+                           # 本轮同时把 lr 降到 5e-5、warmup 拉到 0.2，并先实测批内正样本数。
+tau: 0.2                   # 对比温度（上一轮 0.1 太小：初始嵌入余弦天然 ~0.9，logits 全挤在
+                           # 9~10、softmax 梯度≈0；调大给 logits 留区分余量）
+lambda_vicreg: 1.0         # 方差铰链项权重（防坍缩）。上一轮 0.05 时有效推力只有 0.05×0.0121
+                           # ≈ 0.0006，被 8~10 的对比损失完全淹没，var 项从未生效；提到 1.0 才有话语权
+
+# ---------- 低层蒸馏（G 轮新增，路线 A 唯一变量）----------
+# 教师 = r8_norm：8×8 逐图全局标准化缩略图（192 维），零训练帧级 Top-1 = 60.05%，
+# 是扫描里最强的【单条确定性】描述子（融合版 60.62% 是相似度矩阵级融合，不适合当向量教师）。
+# 教师由训练批里的图像现场算出（与扫描脚本同配方：area 降采样 → 逐图标准化 → L2 归一化），
+# 因此跟随训练时的增强视图，天然与数据增强一致。
+distill: true
+distill_teacher: 'r8_norm'
+distill_res: 8             # 教师缩略图边长
+distill_dim: 192           # 教师维度 = 3*res*res
+distill_hidden: 512        # 投影头隐层
+lambda_distill: 0.5        # 余弦蒸馏损失权重（顾问建议起步值）
+# 总损失 = SupCon + 1.0*VICReg + 0.5*(1 - cos(proj(z), r8_norm))
+
+# ---------- 人脸掩膜擦除（关闭）----------
+# D 轮已证：erase_prob=0.2 与 A 轮基线基本持平（帧级 46.91% vs 47.75%），擦除既无增益也无损害，
+# "人脸区域是捷径"这一假设未被证实。本轮保持关闭，让"低层蒸馏"成为单变量。
+erase_prob: 0.0            # 0 = 关闭（训练视图不擦人脸）
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'  # BiSeNet 掩膜缓存（128×128，49288 张，已就绪）
+use_multiscale_skip: false # 保持关闭：多尺度跳连尚未单测（与擦除同上的那轮崩盘，无法归因）
+geom_aug: false            # 保持关闭 —— F 轮已证几何增强把 7 档里 6 档打低（clean -8.65pp），
+                           # 它要求编码器对全局布局不变，而帧级线索恰在全局布局里，方向相反。
+
+# ---------- 训练 ----------
+# batch 只有 4，所以每轮多跑些步（800 步 × 4 张 = 3200 张/轮），否则一轮见过的样本太少。
+steps_per_epoch: 800
+epochs: 6
+lr: 0.00005                # 与 E 轮一致：细粒度把"同视频相邻帧"变成近乎相同的极难负样本，1e-4 下
+                           # 梯度过陡（旧细粒度轮 e1 3.56% 后反复跳变）。降一半 + 加长预热先求稳。
+weight_decay: 0.0001
+warmup_ratio: 0.2          # warmup 步数 480 -> 960（共 4800 步），让大梯度在低 lr 下先把 BN 养稳
+# 不用 AMP：编码器整段强制 fp32（见 aura/encoder.py 注释）——实测 AMP 下第 40~60 步
+# 会出现 z=nan 的前向溢出；本模型仅 12.81M 参数且无解码器/检测头，fp32 显存可接受。
+amp: false
+cudnn_benchmark: false     # 关键：set_seed 默认会打开它，cuDNN 自动调优瞬时 workspace 会把
+                           # 峰值从 7.6GB 抬到 18.8GB（占卡 83%）并触发 Windows 共享内存回退
+clip_grad_norm: 5.0
+num_workers: 0             # Windows 下必须为 0
+eval_batch_size: 4         # 评估前向无梯度检查点，batch 必须小（见 train.py 注释），16 会爆显存
+log_interval: 20
+eval_every_epoch: 1
+degradation_eval: 'none'   # 光度六档与几何七档都改用 aura/runs/_eval_geom_model.py 单独跑
+                           # （该脚本含 clean 档），train.py 里非 'last' 一律跳过退化评估。
+
+# ---------- 保存 / 日志（绝对路径，落在 aura/ 下） ----------
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'

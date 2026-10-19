@@ -1,5 +1,9 @@
-"""aura 包：AURA 自建模型占位目录。
+"""aura 包：AURA 自建模型（单编码器 + 全图对比学习）。
 
-本目录暂时为空，预留给后续阶段的 AURA (Attack-Unsupervised Retrieval of Authentic
-backgrounds) 自建模型代码。当前实验对照使用 baseline/ 中的简化版 HashVAE。
+组成：
+    encoder.py  SourceEncoder —— 整图输入的单编码器（全量规格主干）
+    losses.py   SupCon（带跨批内存 XBM） + VICReg 式方差铰链
+    data.py     退化增强 + 同源分组批采样
+    eval.py     检索评估（余弦 / 符号二值化汉明，协议同 baseline）
+    train.py    单阶段对比学习训练入口
 """

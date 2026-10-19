@@ -1,0 +1,82 @@
+# AURA 自建单编码器 · 全图对比学习（全量规格）
+# 用法（项目根目录 d:\py\AURA 下）：
+#   E:\conda\envs\pytorch\python.exe -m aura.train --config aura/configs/aura_full.yaml
+# 本文件在 baseline/configs/default.yaml 之上覆盖；路径用绝对路径，避免落到 baseline/ 下。
+name: 'aura_full_fine'        # 方案 (a)：稳定版【细粒度】监督轮（label_key=source_id，与帧级判据对齐）。
+                              # 对照：A 轮 identity 粗粒度 e6 帧级 47.75% / 视频级 99.48%；
+                              # 旧 B 轮同是细粒度但训练极不稳（e1 3.56% 后反复跳变），本轮把
+                              # lr 与 warmup 一并调稳后重测，不沿用旧结论。
+
+# ---------- 数据 ----------
+image_size: 256            # 全量规格（256px）
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（论文原设 + 单编码器） ----------
+embed_dim: 2048            # 全量规格码长（对应论文 hash 2048 位）
+base_channels: 64
+num_branches: 5            # 论文 M=5
+num_rb: 5                  # 论文 D=5
+num_scales: 2
+aff_channels: 512
+# 梯度检查点：前向不存中间激活、反向重算。必须开 —— 256px 全规格下 M=5×D=5 的多分支
+# 残差块激活是显存大头，实测（batch 4）关掉反向峰值 17.0GB、开着 7.6GB。
+grad_checkpoint: true
+
+# ---------- 对比学习 ----------
+# 显存实测（256px 全规格、fp32、batch 4）：前向峰值 4.0GB / 反向峰值 7.6GB。
+# 之前"爆显存"的真正原因是 cuDNN benchmark 自动调优卷积算法时瞬时分配的超大 workspace
+# （把启动峰值抬到 18.8GB、占卡 83%），已由 cudnn_benchmark=false 关掉；模型本身并不大
+# （12.81M 参数，显存大头在卷积激活）。
+groups_per_batch: 2        # 每批取 2 个【分组单元】。分组键由 data.label_key 决定：
+                           #   identity  -> 每单元 = 一个源视频 X（粗粒度，同视频 8 帧互为正样本）
+                           #   source_id -> 每单元 = 一个具体源帧 X_f{帧号}（细粒度；每单元共 6 张：
+                           #                1 张真实帧 + 5 种换脸算法各 1 张，背景逐像素相同、人脸不同）
+samples_per_group: 2       # 每个单元取 2 张 -> batch = 4（细粒度下每锚点恰有 1 个正样本）
+queue_size: 4096           # 跨批内存队列：小 batch 靠它凑出数千个负样本（XBM）。注意队列里
+                           # 每个源出现次数 = 4096 / 类别数：粗粒度 300 类时 ~13 次（正样本管够），
+                           # 细粒度 2400 类时只有 ~1.7 次 —— 细粒度下正样本几乎全靠批内那 1 对。
+label_key: 'source_id'     # 方案 (a)：细粒度，同视频其余 7 帧从"正样本"变"负样本"，与帧级判据对齐。
+                           # 代价：同视频相邻帧是"近乎相同"的极难负样本，可能造成梯度不稳 —— 故
+                           # 本轮同时把 lr 降到 5e-5、warmup 拉到 0.2，并先实测批内正样本数。
+tau: 0.2                   # 对比温度（上一轮 0.1 太小：初始嵌入余弦天然 ~0.9，logits 全挤在
+                           # 9~10、softmax 梯度≈0；调大给 logits 留区分余量）
+lambda_vicreg: 1.0         # 方差铰链项权重（防坍缩）。上一轮 0.05 时有效推力只有 0.05×0.0121
+                           # ≈ 0.0006，被 8~10 的对比损失完全淹没，var 项从未生效；提到 1.0 才有话语权
+
+# ---------- 人脸掩膜擦除（本轮关闭）----------
+# D 轮已证：erase_prob=0.2 与 A 轮基线基本持平（帧级 46.91% vs 47.75%），擦除既无增益也无损害，
+# "人脸区域是捷径"这一假设未被证实。本轮保持关闭，让"细粒度监督"成为单变量。
+erase_prob: 0.0            # 0 = 关闭（训练视图不擦人脸）
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'  # BiSeNet 掩膜缓存（128×128，49288 张，已就绪）
+use_multiscale_skip: false # 保持关闭：多尺度跳连尚未单测（与擦除同上的那轮崩盘，无法归因）
+
+# ---------- 训练 ----------
+# kill 判据在 epoch 2 处裁决；epochs 设 6 是为了同时看到"继续训练是否还在涨"的趋势。
+# batch 只有 4，所以每轮多跑些步（800 步 × 4 张 = 3200 张/轮），否则一轮见过的样本太少。
+steps_per_epoch: 800
+epochs: 6
+lr: 0.00005                # 本轮从 1e-4 降到 5e-5：细粒度把"同视频相邻帧"变成近乎相同的极难负
+                           # 样本，负样本项的分母被极难负样本主导，1e-4 下梯度过陡（旧细粒度轮
+                           # e1 3.56% 后反复跳变）。降一半 + 加长预热先求稳。
+weight_decay: 0.0001
+warmup_ratio: 0.2          # 本轮从 0.1 拉到 0.2：warmup 步数 480 -> 960（共 4800 步），让
+                           # 极难负样本带来的大梯度在低 lr 下先把 BN 统计量养稳
+# 不用 AMP：编码器整段强制 fp32（见 aura/encoder.py 注释）——实测 AMP 下第 40~60 步
+# 会出现 z=nan 的前向溢出；本模型仅 12.81M 参数且无解码器/检测头，fp32 显存可接受。
+amp: false
+cudnn_benchmark: false     # 关键：set_seed 默认会打开它，cuDNN 自动调优瞬时 workspace 会把
+                           # 峰值从 7.6GB 抬到 18.8GB（占卡 83%）并触发 Windows 共享内存回退
+clip_grad_norm: 5.0
+num_workers: 0             # Windows 下必须为 0
+eval_batch_size: 4         # 评估前向无梯度检查点，batch 必须小（见 train.py 注释），16 会爆显存
+log_interval: 20
+eval_every_epoch: 1
+degradation_eval: 'last'   # 退化鲁棒基准（六档，只作用于查询；图库保持干净）只在最后一轮跑：
+                           # 8000 查询 × 6 档 ≈ 4.8 万次前向、约 70 分钟，放每轮太贵
+
+# ---------- 保存 / 日志（绝对路径，落在 aura/ 下） ----------
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'

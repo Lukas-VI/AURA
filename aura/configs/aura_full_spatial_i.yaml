@@ -1,0 +1,70 @@
+# AURA 自建单编码器 · 全图对比学习（全量规格）· I 轮：空间头 + 稳训 + 关梯度检查点
+# 用法（项目根目录 d:\py\AURA 下）：
+#   E:\conda\envs\pytorch\python.exe -m aura.train --config aura/configs/aura_full_spatial_i.yaml
+#
+# 由来（H 轮读数的直接结论，见 aura/runs/train_full_spatial.log）：
+#   H 轮（aura_full_spatial.yaml，去 GAP）已证实"GAP 是瓶颈"——e1 余弦帧级 Top-1 = 58.45%，
+#   相对 E 轮 e1（26.07%）、A 轮 e1（40.04%）是 +12pp 以上的跃升，已越过此前所有轮次最好成绩
+#   （A 轮 e6 47.75%），离零训练 CV 基线（r8_norm 60.05% / 融合 60.62%）只差 1.6pp。
+#   但 H 轮训练不稳：e1 58.45% -> e2 53.20% -> e3 52.21%，非单调；而 E 轮（同 lr/warmup）是
+#   单调上升。诊断：两个因素在 e2 同时发生 —— ① XBM 队列在 e2 第 ~240 步灌满 4096（e1 结束才
+#   3200），负样本数陡增；② lr 在同一位置冲到峰值 5e-5。两者叠加把模型"顶"了一下。
+#   ⇒ I 轮不改架构（spatial_head 保持），只做"稳训"三件事：lr 减半、warmup 加倍、取 best-epoch。
+#
+# 显存：2080Ti 为 22GB 版；H 轮开梯度检查点峰值仅 7685MB（利用率 35%），而检查点是用
+#   ~25-30% 的额外算力换来的。关掉后峰值约 17GB（E 轮架构 batch 4 实测），22GB 充裕，
+#   且梯度数值等价 —— 不改变训练动力学，仍与 E/F 轮可比。
+name: 'aura_full_spatial_i'
+
+# ---------- 数据 ----------
+image_size: 256            # 全量规格（256px）
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（论文原设 + 单编码器） ----------
+embed_dim: 2048            # 全量规格码长（对应论文 hash 2048 位）
+base_channels: 64
+num_branches: 5            # 论文 M=5
+num_rb: 5                  # 论文 D=5
+num_scales: 2
+aff_channels: 512
+# I 轮改动：关掉梯度检查点（22GB 显存富余，换回 ~25-30% 算力）。
+grad_checkpoint: false
+
+# ---------- 空间保留嵌入头（与 H 轮相同，I 轮不动架构）----------
+spatial_head: true
+pool_grid: 8               # 8×8×32 = 2048，与 r8_norm 的 8×8 网格同构
+
+# ---------- 对比学习 ----------
+groups_per_batch: 2        # 每批 2 个分组单元（label_key=source_id 时每单元 = 一个源帧）
+samples_per_group: 2       # 每单元 2 张 -> batch = 4
+queue_size: 4096           # 跨批内存队列（XBM）
+label_key: 'source_id'
+tau: 0.2
+lambda_vicreg: 1.0
+
+# ---------- 人脸掩膜擦除（关闭）----------
+erase_prob: 0.0
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'
+use_multiscale_skip: false
+
+# ---------- 训练 ----------
+steps_per_epoch: 800
+epochs: 6
+lr: 0.00002                 # I 轮改动①：峰值 lr 减半（5e-5 -> 2e-5），压住 e2 的失稳
+weight_decay: 0.0001
+warmup_ratio: 0.4           # I 轮改动②：warmup 加倍（0.2 -> 0.4），延缓进入峰值区
+amp: false
+cudnn_benchmark: false      # 关键：避免 cuDNN 调优瞬时 workspace 把峰值抬上去
+clip_grad_norm: 5.0
+num_workers: 0              # Windows 下必须为 0
+eval_batch_size: 4
+log_interval: 20
+eval_every_epoch: 1
+degradation_eval: 'none'    # 六档光度与七档几何都改用 aura/runs/_eval_geom_model.py 单独跑
+
+# ---------- 保存 / 日志（绝对路径，落在 aura/ 下） ----------
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'
