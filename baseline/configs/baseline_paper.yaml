@@ -1,0 +1,43 @@
+# 论文原规格复现（Liu et al. 2026 全量规模）
+#   掩膜：BiSeNet 人脸解析（沿用 baseline_parse 的改动；这一项是与论文的已知差异，见 README 差异表）
+#   其余全部对齐论文：M=5 分支 / D=5 RB / 64 通道 / aff 512 / hash 2048 位 / 256px 输入
+# 注意：hash_dim 128→2048 后 DDB 的输入维与"加性聚合"维随之变化（DDB 拓扑即论文式12 不变），
+#      因此 baseline_parse.pth 不可加载到本配置，属预期。
+name: 'baseline_paper'
+
+# ---------- 数据 ----------
+image_size: 256            # FF++ 原始帧尺寸；128px 是 4GB 显存时代的妥协
+
+# ---------- 模型（论文原设） ----------
+hash_dim: 2048             # 论文 C=C_f+C_b，前后景各 1024 位
+base_channels: 64
+num_branches: 5            # 论文 M=5
+num_rb: 5                  # 论文 D=5
+num_scales: 2
+aff_channels: 512
+
+# ---------- 训练 ----------
+# 22GB RTX 2080 Ti 实测（256px 全规格，limit 2 冒烟）：
+#   未开 AMP：stage1 bs2 ≈16.2GB；stage2 bs2 溢出 13GB 到共享内存
+#   开 AMP  ：stage1 bs2 =10.3GB；stage1 bs4 + stage2 bs2 =19.7GB（本配置，正常完成）
+# AMP 把激活显存降了约 40%，是论文全规格在 22GB 卡上跑得起来的关键。
+# batch 下限约束：hash_proj 末端 BatchNorm1d 在批内样本数=2 时统计量退化（实测 stage1
+#   hash bit_dev=0.000、哈希坍缩），随后 stage2 直接 NaN。故 stage1 批与 stage2 的
+#   “真假拼接批”（=2×stage2_batch_size）都必须 ≥4，用 4/2 这一档。
+batch_size: 4
+stage2_batch_size: 2
+amp: true
+# 编码器是否强制 fp32：保持 false（曾试过 true，但显存不可行，已放弃）。
+#   曾试方案：让编码器整体走 fp32 以消除 fp16 溢出。实测 256px 全规格下显存顶到 22188/22528 MiB，
+#   22GB 卡已无余量给 stage2，判定必 OOM，已回退。
+#   真实修复在 models/encoder.py 的 hash_proj：Flatten 后先做逐样本 LayerNorm 再投影。
+#   根因（首个非有限步诊断 + 幅值 hook 实测）：编码器卷积栈输出幅值极大（AFF 输出 absmax≈7470），
+#   Linear(512→K) 的 512 项求和在 fp16 下溢出成 inf，末端 BatchNorm1d 收到 inf 即输出 (inf-inf)=NaN
+#   （实测只有背景分支 h_b 变 NaN，前景 h_f 正常）；坏批又会让 GradScaler 把 scale 一路减半到 ~0
+#   → 训练静默空转。LayerNorm 把池化特征归一到 O(1)，从根上消除该溢出，且不额外占显存。
+encoder_fp32: false
+# lr：论文 1e-4。实测 3e-4 在本规格 + 256px 下 stage2 梯度爆炸（四元组项尺度 O(100)）
+# 首步即 NaN；1e-4 稳定。故此处用论文原值（旧 128px 简化基线用的 3e-4 不适用于本规格）。
+lr: 0.0001
+epochs_stage1: 5
+epochs_stage2: 5

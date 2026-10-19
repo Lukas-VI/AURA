@@ -1,0 +1,29 @@
+{
+  "checkpoint": "D:\\py\\AURA\\baseline\\checkpoints/baseline_parse.pth",
+  "n_samples": 9600,
+  "results": [
+    {
+      "feature": "h_f (前景哈希特征，DDB 的输入)",
+      "dim": 64,
+      "n_train": 4800,
+      "n_test": 4800,
+      "test_pos_rate": 0.8333333134651184,
+      "linear_train_auc": 0.55650140625,
+      "linear_test_auc": 0.51050671875,
+      "mlp_train_auc": 0.8566925,
+      "mlp_test_auc": 0.5227115625
+    },
+    {
+      "feature": "h_b (背景哈希特征，对照)",
+      "dim": 64,
+      "n_train": 4800,
+      "n_test": 4800,
+      "test_pos_rate": 0.8333333134651184,
+      "linear_train_auc": 0.52443921875,
+      "linear_test_auc": 0.50101109375,
+      "mlp_train_auc": 0.6174964062499999,
+      "mlp_test_auc": 0.498715
+    }
+  ],
+  "verdict": "(a) h_f 码里没有真假信息 -> 属信息缺失，只能提容量 / 提分辨率"
+}

@@ -113,6 +113,12 @@ class HashEncoder(nn.Module):
             nn.LeakyReLU(0.1),
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
+            # 归一化后再投影：实测编码器卷积栈的输出幅值可达 ~7e3（AFF 输出 absmax=7470），
+            # 直接喂 Linear(aff→hash) 时，512 项求和的中间量在 fp16 下会溢出成 inf，随后末端
+            # BatchNorm1d 收到 inf 即输出 (inf-inf)=NaN —— 实测背景分支 h_b 变 NaN 而前景 h_f
+            # 正常。LayerNorm 把每个样本的池化特征归一到 O(1)，从根上消除该溢出；用逐样本
+            # 归一（而非 BatchNorm）以避免依赖批大小。
+            nn.LayerNorm(aff_channels),
             nn.Linear(aff_channels, hash_dim),
             nn.BatchNorm1d(hash_dim),
             nn.Tanh(),
@@ -126,8 +132,14 @@ class HashEncoder(nn.Module):
             features.append(x)             # 收集当前尺度特征
             if s < len(self.downsample):
                 x = self.downsample[s](x)  # 进入下一尺度前降采样
-        fused = self.aff(features)         # 注意力融合
-        logits = self.hash_proj(fused)     # (B, hash_dim)，Tanh 后取值在 (-1, 1)
+        # AFF 与哈希投影改在 fp32 下运行：诊断已证实 NaN 生在 AFF 内部（同一输入在 fp16 下
+        # 复算 aff=nan，在 fp32 下复算 aff=5.72）——AFF 里 512 通道的求和在 fp16（上限 65504）
+        # 下溢出成 inf，紧随其后的 hash_proj 收到 inf 即产出 NaN。前面的多尺度卷积栈仍走 fp16
+        # （显存大头在它），只把这一小段尾巴升到 fp32。输入必须显式 float()：autocast(enabled=False)
+        # 只关闭自动降精度，不会替你把 fp16 输入升回 fp32。
+        with torch.amp.autocast("cuda", enabled=False):
+            fused = self.aff([f.float() for f in features])    # 注意力融合
+            logits = self.hash_proj(fused)                     # (B, hash_dim)，Tanh 后取值在 (-1, 1)
         return (logits + 1.0) / 2.0        # 映射到 (0, 1)，供软量化 / 最小熵 / 硬量化使用
 
 

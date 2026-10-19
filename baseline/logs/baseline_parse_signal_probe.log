@@ -1,0 +1,43 @@
+[data] train: 300 个视频 -> 2400 张真实 + 12000 张伪造（5 种篡改算法）
+[data] val: 100 个视频 -> 800 张真实 + 4000 张伪造（5 种篡改算法）
+[data] test: 200 个视频 -> 1600 张真实 + 8000 张伪造（5 种篡改算法）
+  [mask-cache] 500/10160
+  [mask-cache] 1000/10160
+  [mask-cache] 1500/10160
+  [mask-cache] 2000/10160
+  [mask-cache] 2500/10160
+  [mask-cache] 3000/10160
+  [mask-cache] 3500/10160
+  [mask-cache] 4000/10160
+  [mask-cache] 4500/10160
+  [mask-cache] 5000/10160
+  [mask-cache] 5500/10160
+  [mask-cache] 6000/10160
+  [mask-cache] 6500/10160
+  [mask-cache] 7000/10160
+  [mask-cache] 7500/10160
+  [mask-cache] 8000/10160
+  [mask-cache] 8500/10160
+  [mask-cache] 9000/10160
+  [mask-cache] 9500/10160
+  [mask-cache] 10000/10160
+  [mask-cache] 10160/10160
+探针样本数: 9600（真实+伪造混合）
+E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py:1160: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10/cuda/CUDAAllocatorConfig.h:28.)
+  return t.to(
+已加载权重: D:\py\AURA\baseline\checkpoints/baseline_parse.pth
+  [probe] 1280/9600
+  [probe] 2560/9600
+  [probe] 3840/9600
+  [probe] 5120/9600
+  [probe] 6400/9600
+  [probe] 7680/9600
+  [probe] 8960/9600
+特征形状: h_f=(9600, 64), h_b=(9600, 64), y 正例率=0.833
+
+=== 探针结果（按视频号分组，帧级无泄漏）===
+h_f (前景哈希特征，DDB 的输入): dim=64 | 线性 train/test AUC = 0.5565/0.5105 | MLP train/test AUC = 0.8567/0.5227
+h_b (背景哈希特征，对照): dim=64 | 线性 train/test AUC = 0.5244/0.5010 | MLP train/test AUC = 0.6175/0.4987
+
+裁决：h_f 线性测试 AUC=0.5105（h_b 对照=0.5010）-> (a) h_f 码里没有真假信息 -> 属信息缺失，只能提容量 / 提分辨率
+结果已保存: D:\py\AURA\baseline\results/baseline_parse_signal_probe.json

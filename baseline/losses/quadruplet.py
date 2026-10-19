@@ -18,14 +18,22 @@
        而不是把前后景拼成一个哈希后统一算（旧实现正是这样，导致真假不可分）。
     2) 距离用【平方 L2 距离】‖·‖²（论文式 14/15 明确写的是平方），旧实现用了开方的
        pairwise_distance。
+    3) 距离【按码长归一化】（除以位数，取均值而非求和）。论文的 margin α=β=0.5 只有在
+       归一化距离上才有意义：hash_dim=2048（每支 1024 位）时未归一化的距离量级是 O(100~500)，
+       margin 0.5 会被彻底淹没，且 O(500) 的损失在 AMP 下梯度溢出、GradScaler 反复跳过更新
+       （实测 stage2 的 scale 十几步内从 65536 崩到 32）。归一化后损失回到 O(1)，各损失项
+       量级可比、margin 生效。
 """
 import torch
 import torch.nn.functional as F
 
 
 def _sq_l2(a, b):
-    """逐样本平方 L2 距离：‖a − b‖²（沿特征维求和，保留 batch 维）。"""
-    return ((a - b) ** 2).sum(dim=1)
+    """逐样本平方 L2 距离，按码长取均值：‖a − b‖² / dim（沿特征维取平均，保留 batch 维）。
+
+    取均值而非求和，是为了让距离与 margin（论文 α=β=0.5）在同一尺度上。
+    """
+    return ((a - b) ** 2).mean(dim=1)
 
 
 def quadruplet_loss(h_f_q, h_f_p1, h_b_q, h_b_p2, h_f_neg, h_b_neg,

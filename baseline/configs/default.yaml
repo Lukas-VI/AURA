@@ -46,6 +46,9 @@ epochs_stage2: 5
 weight_decay: 0.0
 num_workers: 0           # Windows 下必须为 0，避免共享内存问题
 device: 'auto'           # auto -> 有 GPU 用 GPU，否则 CPU
+amp: false               # 混合精度训练（fp16 前向/反向，激活显存约省 40%）。显存紧张时开启
+clip_grad_norm: 1.0      # AMP 配套的梯度裁剪上限（缺它时 fp16 梯度易溢出、长训练会 NaN）
+log_interval: 50         # 每多少步打印一次逐轮（step 级）日志
 
 # ---------- 损失权重 ----------
 lambda_recon: 1.0

@@ -20,6 +20,7 @@
 import argparse
 import json
 import os
+import time
 
 # 必须在 import torch 之前设置：4GB 显存下开启可扩展显存段，缓解碎片导致的 OOM
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -70,40 +71,151 @@ def tensor_swap(faker: SyntheticFaceSwap, src: torch.Tensor, donor: torch.Tensor
 
 # ---------------- 训练流程 ----------------
 
+def _diag_nonfinite(model, tensors: dict):
+    """在首个非有限损失出现时打印一次诊断：逐项检查输入/中间量/参数是否有限。
+
+    用途：区分「数据坏了」/「前向 fp16 溢出」/「参数已成 NaN」三种成因——这三者的修法
+    完全不同（换数据 / 数值稳定化 / 回滚优化器状态），必须一次问清。若给了前景输入，
+    再把编码器在 fp16 / fp32 下各复算一次并报告各阶段幅值，用来定位溢出发生在哪一层。
+    """
+    items = []
+    with torch.no_grad():
+        for k, t in tensors.items():
+            if t is None or not t.dtype.is_floating_point:
+                continue
+            items.append(f"{k}: finite={bool(torch.isfinite(t).all())}, absmax={float(t.abs().max()):.3g}")
+        ok = all(bool(torch.isfinite(p).all()) for p in model.parameters())
+    print("[diag] 首个非有限损失诊断 -> " + " | ".join(items)
+          + f" | param: {'所有参数有限' if ok else '!!! 参数已含 NaN/inf'}", flush=True)
+
+    # 前景/背景各复算一次：实测 NaN 常只出现在背景分支 h_b（前景 h_f 正常），
+    # 若只复算 fg 就复现不出问题，会误判为"编码器正常"。两路都跑才能直接定位。
+    xf, xb = tensors.get("fg"), tensors.get("bg")
+    if xf is None and xb is None:
+        return
+
+    def _stats(x):
+        """在 AMP（fp16）下复算一次编码器，用 hook 记录各阶段输出的有限性/幅值。"""
+        seen = {}
+
+        def _hook(tag):
+            def f(_mod, _inp, out):
+                if isinstance(out, torch.Tensor) and out.dtype.is_floating_point:
+                    seen[tag] = (bool(torch.isfinite(out).all()), float(out.detach().abs().max()))
+            return f
+
+        hs = [model.encoder.conv0.register_forward_hook(_hook("conv0")),
+              model.encoder.aff.register_forward_hook(_hook("aff")),
+              model.encoder.hash_proj.register_forward_hook(_hook("hash_proj"))]
+        try:
+            with torch.no_grad(), torch.amp.autocast("cuda", enabled=True):
+                model.encoder(x)
+        finally:
+            for h in hs:
+                h.remove()
+        return seen
+
+    # 只复算 fp16 这一路：此前为了对照同时复算 fp32（一次诊断共 4 遍编码器），在 256px
+    # 全规格下把显存额外顶爆约 10G 并卡死进程。fp16 正是出问题的那一路，fp32 对照的结论
+    # 已经拿到（aff 在 fp32 下有限），无需再跑。
+    for in_tag, x in (("fg", xf), ("bg", xb)):      # 前景/背景各复算一次
+        if x is None:
+            continue
+        s = _stats(x, True)
+        print(f"[diag] 编码器 {in_tag}/fp16 复算 -> "
+              + " | ".join(f"{k}: finite={v[0]}, absmax={v[1]:.3g}" for k, v in s.items()), flush=True)
+
+
 def train_stage1(model, loader, optimizer, cfg, device, epoch, writer=None):
-    """阶段 1：前景重构 + 背景重构 + 最小熵 + 比特平衡（论文式 11）。"""
+    """阶段 1：前景重构 + 背景重构 + 最小熵 + 比特平衡（论文式 11）。
+
+    AMP（cfg['amp']=true 时启用）：前向/反向走 fp16，激活显存约省 40%，是论文全规格
+    （M=5/D=5/64ch/aff512/hash2048）在 22GB 卡上跑得起来的关键。损失全部在 fp32 里算
+    （把模型输出 .float() 后再进损失），避免 fp16 下 log/sum 的精度问题。
+    """
     model.train()
+    use_amp = bool(cfg.get("amp", False)) and device.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     total_r, total_h, total_b, n = 0.0, 0.0, 0.0, 0
+    skipped = 0                                        # 因梯度溢出被 GradScaler 跳过的步数
+    nonfinite = 0                                      # 前向损失即非有限、被主动丢弃的批数
     hash_batches = []                                  # 收集哈希特征，用于统计是否坍缩
-    for batch in loader:
+    log_interval = int(cfg.get("log_interval", 50))    # 每多少步打印一次逐轮日志
+    total_steps = len(loader)
+    t_last = time.time()
+    for step, batch in enumerate(loader, 1):
         img = batch["image"].to(device)
         mask = batch["mask"].to(device)                            # 逐样本前景掩膜（BiSeNet 解析）
-        out = model(img, mask=mask, need_recon=True, need_pred=False)   # 阶段1无需检测分支
+        with torch.amp.autocast("cuda", enabled=use_amp):
+            out = model(img, mask=mask, need_recon=True, need_pred=False)  # 阶段1无需检测分支
 
         # 重构损失 = 前景 L2 + 背景 L2（论文式 9）；前后景目标由传入的前景掩膜给出
-        loss_r = (reconstruction_loss(out["recon_f"], out["fg"]) +
-                  reconstruction_loss(out["recon_b"], out["bg"]))
-        loss_h = min_entropy_loss(out["hash"])         # 作用于前后景拼接哈希
-        loss_b = bit_balance_loss(out["hash"])         # 防止所有样本被编码成同一个码
+        loss_r = (reconstruction_loss(out["recon_f"].float(), out["fg"].float()) +
+                  reconstruction_loss(out["recon_b"].float(), out["bg"].float()))
+        hash_feat = out["hash"].float()
+        loss_h = min_entropy_loss(hash_feat)            # 作用于前后景拼接哈希
+        loss_b = bit_balance_loss(hash_feat)            # 防止所有样本被编码成同一个码
         loss = (cfg["lambda_recon"] * loss_r + cfg["lambda_entropy"] * loss_h +
                 cfg.get("lambda_balance", 0.1) * loss_b)
 
+        # ---- 非有限损失保护：整批丢弃，既不 backward 也不碰 GradScaler ----
+        # 若不丢弃而照常 backward：NaN 梯度会让 GradScaler 把 scale 减半，坏批频繁出现时
+        # scale 会被一路减到 ~0，此后所有梯度都被乘 0 —— 训练静默空转（实测 256px 全规格
+        # stage1 正是如此：scale 65536→0、loss 恒 NaN 而参数不再更新）。丢弃坏批后 scale
+        # 保持不动，偶发的 fp16 溢出不再拖垮整轮训练。
+        if not torch.isfinite(loss):
+            nonfinite += 1
+            if nonfinite == 1:                      # 只在首次打印完整诊断，避免刷屏
+                _diag_nonfinite(model, {"img": img, "mask": mask, "fg": out["fg"], "bg": out["bg"],
+                                        "h_f": out["h_f"], "h_b": out["h_b"],
+                                        "recon_f": out["recon_f"], "hash": hash_feat})
+            optimizer.zero_grad(set_to_none=True)
+            if nonfinite % 50 == 0:
+                print(f"  [Stage1 e{epoch} step {step}/{total_steps}] 非有限损失累计 {nonfinite} 步，已丢弃",
+                      flush=True)
+            continue
+
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        # AMP 的标准配套：先反缩放再裁剪梯度，防止 fp16 梯度溢出后直接污染参数
+        # （实测缺这一步时 256px 全规格 stage1 跑到某一步即 loss 全 NaN）
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float(cfg.get("clip_grad_norm", 1.0)))
+        prev_scale = scaler.get_scale()                # 记录步前 scale：若步后变小说明本步溢出被跳过
+        scaler.step(optimizer)
+        scaler.update()
+        if scaler.get_scale() < prev_scale:
+            skipped += 1
 
         total_r += loss_r.item() * img.shape[0]
         total_h += loss_h.item() * img.shape[0]
         total_b += loss_b.item() * img.shape[0]
         n += img.shape[0]
-        hash_batches.append(out["hash"].detach().cpu())
+        hash_batches.append(hash_feat.detach().cpu())
+
+        # ---- 逐轮（step 级）日志：便于观察每一步的损失分量 / 哈希分布 / lr / AMP scale ----
+        if step % log_interval == 0 or step == total_steps:
+            now = time.time()
+            ms = (now - t_last) / log_interval * 1000
+            t_last = now
+            hb = hash_feat.detach()
+            print(f"  [Stage1 e{epoch} {step:>5}/{total_steps}] "
+                  f"loss={loss.item():.4f} r={loss_r.item():.4f} h={loss_h.item():.4f} b={loss_b.item():.4f} "
+                  f"| hash[min={hb.min():.3f},max={hb.max():.3f},dev={(hb.mean(0)-0.5).abs().mean():.3f}] "
+                  f"| lr={optimizer.param_groups[0]['lr']:.2e} scale={scaler.get_scale():.0f} "
+                  f"skip={skipped} nf={nonfinite} "
+                  f"| {ms:.0f}ms/step eta={(total_steps-step)*ms/60000:.1f}min", flush=True)
 
     avg_r, avg_h, avg_b = total_r / max(n, 1), total_h / max(n, 1), total_b / max(n, 1)
     # 哈希特征统计：min/max 逼近 0/1 说明已二值化；bit_mean_dev 越小说明各比特越均衡、越不坍缩
+    if not hash_batches:                     # 极端情况：整轮都是非有限损失（已被丢弃）
+        print(f"  [Stage1] epoch {epoch}: 整轮无有效批次（nonfinite={nonfinite}）")
+        return {"recon": None, "entropy": None, "balance": None}
     h = torch.cat(hash_batches, dim=0)
     dev = (h.mean(dim=0) - 0.5).abs().mean().item()
     print(f"  [Stage1] epoch {epoch}: loss_r={avg_r:.4f}, loss_h={avg_h:.4f}, loss_b={avg_b:.4f} "
-          f"| hash[min={h.min():.3f}, max={h.max():.3f}, mean={h.mean():.3f}, bit_dev={dev:.3f}]")
+          f"| hash[min={h.min():.3f}, max={h.max():.3f}, mean={h.mean():.3f}, bit_dev={dev:.3f}] "
+          f"| amp_scale={scaler.get_scale():.0f}, skipped={skipped}")
     if writer:
         writer.add_scalar("stage1/recon", avg_r, epoch)
         writer.add_scalar("stage1/entropy", avg_h, epoch)
@@ -123,11 +235,18 @@ def train_stage2(model, loader, optimizer, faker, cfg, device, epoch, writer=Non
     换脸算法生成的，前景里带有真实的融合伪影，DDB 才有可学的信号。
     """
     model.train()
+    use_amp = bool(cfg.get("amp", False)) and device.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     acc = {k: 0.0 for k in ["loss", "recon", "entropy", "balance", "quad", "cls"]}
     n = 0
     m_fg = float(cfg.get("margin_fg", 0.5))     # 论文 α
     m_bg = float(cfg.get("margin_bg", 0.5))     # 论文 β
-    for batch in loader:
+    skipped = 0                                        # 因梯度溢出被 GradScaler 跳过的步数
+    nonfinite = 0                                      # 前向损失即非有限、被主动丢弃的批数
+    log_interval = int(cfg.get("log_interval", 50))    # 每多少步打印一次逐轮日志
+    total_steps = len(loader)
+    t_last = time.time()
+    for step, batch in enumerate(loader, 1):
         img_q = batch["img_q"].to(device)      # q：真实源图（伪造图的背景来源）
         img_f = batch["img_fake"].to(device)   # q+2：真实伪造图
         img_d = batch["img_donor"].to(device)  # q−：供体视频的真实图
@@ -142,30 +261,32 @@ def train_stage2(model, loader, optimizer, faker, cfg, device, epoch, writer=Non
         # 【关键】q 与真实伪造图必须拼成一个【混合批】一次编码。
         # 原因：hash_proj 末端的 BatchNorm1d 在训练态按“批内统计量”归一化。若真/假各自单独成批
         # （类纯 + batch=2），每维会被归一成恰好 ±1，哈希退化成只反映“批内两张图的相对次序”，
-        # 不再是单张图自身的函数——DDB 因此拿不到任何真假信号（实测 cls 恒为 ln2≈1.386、
+        # 不再是单张图自身的函数——DDB 因此拿不到任何真假信号（实测 cls 恒为 2·ln2 = ln4 ≈ 1.386、
         # quad 在 0.44↔1.64 剧烈震荡、换脸后硬量化码变化 0 位）。混合成一批后 BN 同时看到两类，
         # 哈希重新成为单张图的可微函数，检测才有可回传的梯度。
-        enc_qf = model.encode(torch.cat([img_q, img_f], dim=0),
-                              mask=torch.cat([mask_q, mask_f], dim=0))
-        h_f_q, h_f_f = enc_qf["h_f"].chunk(2, dim=0)     # 锚点前景哈希 / 真实伪造图前景哈希
-        h_b_q, h_b_f = enc_qf["h_b"].chunk(2, dim=0)     # 锚点背景哈希 / 真实伪造图背景哈希
-        fg_q, _ = enc_qf["fg"].chunk(2, dim=0)           # 重构目标只取 q 这一半
-        bg_q, _ = enc_qf["bg"].chunk(2, dim=0)
+        with torch.amp.autocast("cuda", enabled=use_amp):
+            enc_qf = model.encode(torch.cat([img_q, img_f], dim=0),
+                                  mask=torch.cat([mask_q, mask_f], dim=0))
+            h_f_q, h_f_f = [t.float() for t in enc_qf["h_f"].chunk(2, dim=0)]   # 锚点前景哈希 / 伪造图前景哈希
+            h_b_q, h_b_f = [t.float() for t in enc_qf["h_b"].chunk(2, dim=0)]   # 锚点背景哈希 / 伪造图背景哈希
+            fg_q = enc_qf["fg"].chunk(2, dim=0)[0].float()   # 重构目标只取 q 这一半
+            bg_q = enc_qf["bg"].chunk(2, dim=0)[0].float()
 
         # q+1 / q− 只需哈希值（作为四元组的另一端），不保留计算图以省显存
         # （4GB 卡上 batch 4 保留两张图会溢出到共享内存，单步从 0.9s 掉到 7s）。
-        with torch.no_grad():
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=use_amp):
             enc_pn = model.encode(torch.cat([q1, img_d], dim=0),
                                   mask=torch.cat([mask_d, mask_d], dim=0))
-            h_f_p1, h_f_n = enc_pn["h_f"].chunk(2, dim=0)
-            h_b_p1, h_b_n = enc_pn["h_b"].chunk(2, dim=0)
+            h_f_p1, h_f_n = [t.float() for t in enc_pn["h_f"].chunk(2, dim=0)]
+            h_b_p1, h_b_n = [t.float() for t in enc_pn["h_b"].chunk(2, dim=0)]
 
         # 重构/检测按需在各半段上单独跑，避免对不需要的样本浪费显存
         hash_q = torch.cat([h_f_q, h_b_q], dim=1)                 # 拼接哈希，供最小熵/比特平衡
-        recon_f = model.decoder(h_f_q)                            # ~x_f(q)
-        recon_b = model.decoder(h_b_q)                            # ~x_b(q)
-        pred_q = model.detector(h_f_q)                            # q 的伪造概率（标签 0）
-        pred_f = model.detector(h_f_f)                            # q+2 的伪造概率（标签 1）
+        with torch.amp.autocast("cuda", enabled=use_amp):
+            recon_f = model.decoder(h_f_q).float()                # ~x_f(q)
+            recon_b = model.decoder(h_b_q).float()                # ~x_b(q)
+            pred_q = model.detector(h_f_q).float()                # q 的伪造概率（标签 0）
+            pred_f = model.detector(h_f_f).float()                # q+2 的伪造概率（标签 1）
 
         loss_r = (reconstruction_loss(recon_f, fg_q) +
                   reconstruction_loss(recon_b, bg_q))
@@ -185,9 +306,28 @@ def train_stage2(model, loader, optimizer, faker, cfg, device, epoch, writer=Non
                 cfg.get("lambda_balance", 0.1) * loss_b +
                 cfg["lambda_quadruplet"] * loss_quad + cfg["lambda_detection"] * loss_c)
 
+        # 与 stage1 同款的非有限步保护：丢弃坏批，避免 GradScaler 的 scale 被 NaN 梯度拖到 0
+        if not torch.isfinite(loss):
+            nonfinite += 1
+            if nonfinite == 1:
+                _diag_nonfinite(model, {"img_q": img_q, "img_fake": img_f, "img_donor": img_d,
+                                        "fg_q": fg_q, "recon_f": recon_f, "hash_q": hash_q})
+            optimizer.zero_grad(set_to_none=True)
+            if nonfinite % 50 == 0:
+                print(f"  [Stage2 e{epoch} step {step}/{total_steps}] 非有限损失累计 {nonfinite} 步，已丢弃",
+                      flush=True)
+            continue
+
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        # 同 stage1：AMP 必须配梯度裁剪，否则 fp16 梯度溢出会直接把参数推成 NaN
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float(cfg.get("clip_grad_norm", 1.0)))
+        prev_scale = scaler.get_scale()
+        scaler.step(optimizer)
+        scaler.update()
+        if scaler.get_scale() < prev_scale:
+            skipped += 1
 
         bs = img_q.shape[0]
         acc["loss"] += loss.item() * bs
@@ -198,9 +338,24 @@ def train_stage2(model, loader, optimizer, faker, cfg, device, epoch, writer=Non
         acc["cls"] += loss_c.item() * bs
         n += bs
 
+        # ---- 逐轮（step 级）日志：损失分量 / 哈希分布 / lr / AMP scale ----
+        if step % log_interval == 0 or step == total_steps:
+            now = time.time()
+            ms = (now - t_last) / log_interval * 1000
+            t_last = now
+            hb = hash_q.detach()
+            print(f"  [Stage2 e{epoch} {step:>5}/{total_steps}] "
+                  f"loss={loss.item():.4f} r={loss_r.item():.4f} h={loss_h.item():.4f} b={loss_b.item():.4f} "
+                  f"quad={loss_quad.item():.4f} cls={loss_c.item():.4f} "
+                  f"| hash[min={hb.min():.3f},max={hb.max():.3f},dev={(hb.mean(0)-0.5).abs().mean():.3f}] "
+                  f"| lr={optimizer.param_groups[0]['lr']:.2e} scale={scaler.get_scale():.0f} "
+                  f"skip={skipped} nf={nonfinite} "
+                  f"| {ms:.0f}ms/step eta={(total_steps-step)*ms/60000:.1f}min", flush=True)
+
     for k in acc:
         acc[k] /= max(n, 1)
-    print(f"  [Stage2] epoch {epoch}: " + ", ".join(f"{k}={v:.4f}" for k, v in acc.items()))
+    print(f"  [Stage2] epoch {epoch}: " + ", ".join(f"{k}={v:.4f}" for k, v in acc.items())
+          + f" | amp_scale={scaler.get_scale():.0f}, skipped={skipped}, nonfinite={nonfinite}")
     if writer:
         for k, v in acc.items():
             writer.add_scalar(f"stage2/{k}", v, epoch)

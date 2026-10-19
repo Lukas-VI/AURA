@@ -19,6 +19,35 @@ _KEY_FIELD = {"bg": "code_b", "fg": "code_f", "full": "code"}
 
 
 @torch.no_grad()
+def _hamming_topk(query, db, k, q_chunk=64, db_chunk=512):
+    """分批计算 L1(cdist p=1) 距离并取 Top-K，避免一次性物化 (Nq, Ndb, D) 中间量。
+
+    hash_dim=2048 时，1600×14944 的查询-库矩阵若是整块算，中间量可达上百 GB，
+    因此按查询行 / 数据库行分块，块内取 Top-K 后再合并。
+    返回 (distances, indices)，形状均为 (Nq, k)；距离最小 = 最相似。
+    """
+    q = query.float()
+    d = db.float()
+    nq = q.shape[0]
+    out_d, out_i = [], []
+    for s in range(0, nq, q_chunk):
+        qi = q[s:s + q_chunk]
+        row_d, row_i = [], []
+        for t in range(0, d.shape[0], db_chunk):
+            dj = d[t:t + db_chunk]
+            dist = torch.cdist(qi, dj, p=1)                 # (chunk_q, chunk_db)
+            td, ti = dist.topk(k, largest=False, dim=1)     # 块内 Top-K
+            row_d.append(td)
+            row_i.append(ti + t)                            # 还原为全局库索引
+        row_d = torch.cat(row_d, dim=1)
+        row_i = torch.cat(row_i, dim=1)
+        td, ti = row_d.topk(k, largest=False, dim=1)        # 跨块合并
+        out_d.append(td)
+        out_i.append(row_i.gather(1, ti))
+    return torch.cat(out_d, dim=0), torch.cat(out_i, dim=0)
+
+
+@torch.no_grad()
 def build_database(model, loader, device, key: str = "bg"):
     """把数据库（真实图）编码成哈希码，并记录对应的 id。"""
     model.eval()
@@ -61,9 +90,8 @@ def evaluate_retrieval(model, database_loader, query_loader, device, top_k=(1, 5
         hash_code = out[field].cpu()
         src_ids = list(batch["source_id"])
 
-        # 汉明距离：硬量化后 L1(cdist p=1) 等价于汉明距离
-        distances = torch.cdist(hash_code.float(), db_hashes.float(), p=1)
-        _, indices = distances.topk(max_k, largest=False)   # 距离最小 = 最相似
+        # 汉明距离：硬量化后 L1(cdist p=1) 等价于汉明距离；分批计算以控显存/内存
+        _, indices = _hamming_topk(hash_code, db_hashes, max_k)
 
         for i in range(len(src_ids)):
             retrieved = [db_ids[j] for j in indices[i].tolist()]

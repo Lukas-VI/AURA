@@ -1,0 +1,95 @@
+device = cuda (NVIDIA GeForce RTX 2080 Ti) | torch = 2.4.1+cu124
+[data] train: 300 个视频 -> 2400 张真实 + 12000 张伪造（5 种篡改算法）
+[data] val: 100 个视频 -> 800 张真实 + 4000 张伪造（5 种篡改算法）
+[data] test: 200 个视频 -> 1600 张真实 + 8000 张伪造（5 种篡改算法）
+  [mask-cache] 500/14944
+  [mask-cache] 1000/14944
+  [mask-cache] 1500/14944
+  [mask-cache] 2000/14944
+  [mask-cache] 2500/14944
+  [mask-cache] 3000/14944
+  [mask-cache] 3500/14944
+  [mask-cache] 4000/14944
+  [mask-cache] 4500/14944
+  [mask-cache] 5000/14944
+  [mask-cache] 5500/14944
+  [mask-cache] 6000/14944
+  [mask-cache] 6500/14944
+  [mask-cache] 7000/14944
+  [mask-cache] 7500/14944
+  [mask-cache] 8000/14944
+  [mask-cache] 8500/14944
+  [mask-cache] 9000/14944
+  [mask-cache] 9500/14944
+  [mask-cache] 10000/14944
+  [mask-cache] 10500/14944
+  [mask-cache] 11000/14944
+  [mask-cache] 11500/14944
+  [mask-cache] 12000/14944
+  [mask-cache] 12500/14944
+  [mask-cache] 13000/14944
+  [mask-cache] 13500/14944
+  [mask-cache] 14000/14944
+  [mask-cache] 14500/14944
+  [mask-cache] 14944/14944
+前景掩膜来源: parse（缓存已就绪）
+训练集样本: 14400 张（含真实+伪造）| 四元组样本: 12000 | batch: stage1=4, stage2=2
+E:\conda\envs\pytorch\Lib\site-packages\torch\nn\modules\module.py:1160: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\c10/cuda/CUDAAllocatorConfig.h:28.)
+  return t.to(
+=== Stage 1: 无监督哈希学习 ===
+  [Stage1 e1    50/3600] loss=0.1837 r=0.1409 h=0.4263 b=0.0018 | hash[min=0.030,max=0.970,dev=0.036] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 991ms/step eta=58.6min
+  [Stage1 e1   100/3600] loss=0.2520 r=0.2081 h=0.4373 b=0.0017 | hash[min=0.030,max=0.971,dev=0.036] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 901ms/step eta=52.5min
+  [Stage1 e1   150/3600] loss=0.1980 r=0.1554 h=0.4234 b=0.0021 | hash[min=0.029,max=0.971,dev=0.039] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 900ms/step eta=51.7min
+  [Stage1 e1   200/3600] loss=0.1644 r=0.1216 h=0.4260 b=0.0025 | hash[min=0.028,max=0.972,dev=0.044] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 902ms/step eta=51.1min
+  [Stage1 e1   250/3600] loss=0.1615 r=0.1204 h=0.4097 b=0.0014 | hash[min=0.028,max=0.972,dev=0.028] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 903ms/step eta=50.4min
+  [Stage1 e1   300/3600] loss=0.2292 r=0.1867 h=0.4216 b=0.0026 | hash[min=0.028,max=0.972,dev=0.042] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 903ms/step eta=49.6min
+  [Stage1 e1   350/3600] loss=0.1307 r=0.0872 h=0.4313 b=0.0034 | hash[min=0.027,max=0.973,dev=0.051] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 903ms/step eta=48.9min
+  [Stage1 e1   400/3600] loss=0.1547 r=0.1116 h=0.4288 b=0.0027 | hash[min=0.027,max=0.973,dev=0.046] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 906ms/step eta=48.3min
+  [Stage1 e1   450/3600] loss=0.1747 r=0.1337 h=0.4087 b=0.0015 | hash[min=0.027,max=0.973,dev=0.029] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 919ms/step eta=48.2min
+  [Stage1 e1   500/3600] loss=0.1439 r=0.1024 h=0.4120 b=0.0029 | hash[min=0.026,max=0.974,dev=0.044] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 910ms/step eta=47.0min
+  [Stage1 e1   550/3600] loss=0.1235 r=0.0808 h=0.4241 b=0.0035 | hash[min=0.026,max=0.974,dev=0.051] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 978ms/step eta=49.7min
+  [Stage1 e1   600/3600] loss=0.0998 r=0.0574 h=0.4212 b=0.0019 | hash[min=0.025,max=0.974,dev=0.035] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 963ms/step eta=48.2min
+  [Stage1 e1   650/3600] loss=0.1106 r=0.0672 h=0.4300 b=0.0039 | hash[min=0.025,max=0.975,dev=0.057] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 930ms/step eta=45.7min
+  [Stage1 e1   700/3600] loss=0.1252 r=0.0849 h=0.4026 b=0.0012 | hash[min=0.025,max=0.975,dev=0.026] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 926ms/step eta=44.7min
+  [Stage1 e1   750/3600] loss=0.1417 r=0.0992 h=0.4221 b=0.0026 | hash[min=0.025,max=0.975,dev=0.045] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 928ms/step eta=44.1min
+  [Stage1 e1   800/3600] loss=0.1053 r=0.0673 h=0.3797 b=0.0008 | hash[min=0.024,max=0.975,dev=0.019] | lr=1.00e-04 scale=65536 skip=0 nf=0 | 928ms/step eta=43.3min
+  [Stage1 e1   850/3600] loss=0.1165 r=0.0780 h=0.3846 b=0.0008 | hash[min=0.024,max=0.976,dev=0.018] | lr=1.00e-04 scale=32768 skip=1 nf=0 | 926ms/step eta=42.4min
+  [Stage1 e1   900/3600] loss=0.0983 r=0.0551 h=0.4268 b=0.0055 | hash[min=0.023,max=0.977,dev=0.070] | lr=1.00e-04 scale=32768 skip=1 nf=0 | 925ms/step eta=41.6min
+  [Stage1 e1   950/3600] loss=0.1108 r=0.0718 h=0.3880 b=0.0018 | hash[min=0.023,max=0.977,dev=0.031] | lr=1.00e-04 scale=32768 skip=1 nf=0 | 926ms/step eta=40.9min
+  [Stage1 e1  1000/3600] loss=0.2786 r=0.2359 h=0.4235 b=0.0036 | hash[min=0.022,max=0.977,dev=0.054] | lr=1.00e-04 scale=32768 skip=1 nf=0 | 928ms/step eta=40.2min
+  [Stage1 e1  1050/3600] loss=0.1363 r=0.0944 h=0.4164 b=0.0030 | hash[min=0.023,max=0.977,dev=0.048] | lr=1.00e-04 scale=32768 skip=1 nf=0 | 928ms/step eta=39.5min
+  [Stage1 e1  1100/3600] loss=0.1162 r=0.0754 h=0.4061 b=0.0025 | hash[min=0.022,max=0.978,dev=0.037] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 928ms/step eta=38.7min
+  [Stage1 e1  1150/3600] loss=0.1364 r=0.0964 h=0.3985 b=0.0016 | hash[min=0.022,max=0.978,dev=0.030] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 925ms/step eta=37.8min
+  [Stage1 e1  1200/3600] loss=0.3254 r=0.2839 h=0.4134 b=0.0024 | hash[min=0.022,max=0.978,dev=0.042] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 926ms/step eta=37.0min
+  [Stage1 e1  1250/3600] loss=0.1043 r=0.0649 h=0.3921 b=0.0013 | hash[min=0.022,max=0.978,dev=0.027] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 933ms/step eta=36.6min
+  [Stage1 e1  1300/3600] loss=0.1161 r=0.0752 h=0.4065 b=0.0024 | hash[min=0.021,max=0.979,dev=0.041] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 928ms/step eta=35.6min
+  [Stage1 e1  1350/3600] loss=0.1634 r=0.1213 h=0.4173 b=0.0037 | hash[min=0.021,max=0.979,dev=0.056] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 928ms/step eta=34.8min
+  [Stage1 e1  1400/3600] loss=0.1957 r=0.1541 h=0.4131 b=0.0028 | hash[min=0.020,max=0.979,dev=0.044] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 927ms/step eta=34.0min
+  [Stage1 e1  1450/3600] loss=0.1365 r=0.0950 h=0.4109 b=0.0034 | hash[min=0.020,max=0.979,dev=0.053] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 927ms/step eta=33.2min
+  [Stage1 e1  1500/3600] loss=0.1806 r=0.1401 h=0.4025 b=0.0028 | hash[min=0.020,max=0.979,dev=0.043] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 926ms/step eta=32.4min
+  [Stage1 e1  1550/3600] loss=0.1147 r=0.0733 h=0.4096 b=0.0044 | hash[min=0.019,max=0.980,dev=0.060] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 928ms/step eta=31.7min
+  [Stage1 e1  1600/3600] loss=0.1293 r=0.0909 h=0.3833 b=0.0008 | hash[min=0.020,max=0.979,dev=0.020] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 928ms/step eta=30.9min
+  [Stage1 e1  1650/3600] loss=0.1113 r=0.0765 h=0.3475 b=0.0004 | hash[min=0.020,max=0.979,dev=0.010] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 937ms/step eta=30.5min
+  [Stage1 e1  1700/3600] loss=0.1021 r=0.0605 h=0.4116 b=0.0050 | hash[min=0.019,max=0.981,dev=0.066] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 940ms/step eta=29.8min
+  [Stage1 e1  1750/3600] loss=0.1153 r=0.0768 h=0.3835 b=0.0016 | hash[min=0.019,max=0.980,dev=0.030] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 933ms/step eta=28.8min
+  [Stage1 e1  1800/3600] loss=0.0943 r=0.0561 h=0.3783 b=0.0037 | hash[min=0.018,max=0.981,dev=0.045] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 931ms/step eta=27.9min
+  [Stage1 e1  1850/3600] loss=0.0989 r=0.0608 h=0.3800 b=0.0011 | hash[min=0.020,max=0.980,dev=0.024] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 932ms/step eta=27.2min
+  [Stage1 e1  1900/3600] loss=0.1116 r=0.0710 h=0.4041 b=0.0024 | hash[min=0.019,max=0.981,dev=0.042] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 932ms/step eta=26.4min
+  [Stage1 e1  1950/3600] loss=0.0962 r=0.0573 h=0.3857 b=0.0035 | hash[min=0.016,max=0.981,dev=0.047] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 935ms/step eta=25.7min
+  [Stage1 e1  2000/3600] loss=0.1280 r=0.0893 h=0.3832 b=0.0033 | hash[min=0.018,max=0.982,dev=0.045] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 992ms/step eta=26.4min
+  [Stage1 e1  2050/3600] loss=0.1070 r=0.0654 h=0.4127 b=0.0032 | hash[min=0.016,max=0.982,dev=0.048] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 995ms/step eta=25.7min
+  [Stage1 e1  2100/3600] loss=0.1369 r=0.0994 h=0.3725 b=0.0019 | hash[min=0.017,max=0.981,dev=0.031] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 991ms/step eta=24.8min
+  [Stage1 e1  2150/3600] loss=0.1072 r=0.0687 h=0.3824 b=0.0025 | hash[min=0.017,max=0.981,dev=0.039] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 1000ms/step eta=24.2min
+  [Stage1 e1  2200/3600] loss=0.1161 r=0.0779 h=0.3799 b=0.0015 | hash[min=0.016,max=0.982,dev=0.030] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 993ms/step eta=23.2min
+  [Stage1 e1  2250/3600] loss=0.1023 r=0.0614 h=0.4063 b=0.0035 | hash[min=0.017,max=0.982,dev=0.051] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 990ms/step eta=22.3min
+  [Stage1 e1  2300/3600] loss=0.1083 r=0.0719 h=0.3618 b=0.0014 | hash[min=0.017,max=0.983,dev=0.025] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 932ms/step eta=20.2min
+  [Stage1 e1  2350/3600] loss=0.1385 r=0.1010 h=0.3725 b=0.0021 | hash[min=0.017,max=0.982,dev=0.037] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 929ms/step eta=19.3min
+  [Stage1 e1  2400/3600] loss=0.0949 r=0.0550 h=0.3974 b=0.0016 | hash[min=0.016,max=0.983,dev=0.034] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 928ms/step eta=18.6min
+  [Stage1 e1  2450/3600] loss=0.0964 r=0.0569 h=0.3910 b=0.0033 | hash[min=0.015,max=0.984,dev=0.050] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 933ms/step eta=17.9min
+  [Stage1 e1  2500/3600] loss=0.0977 r=0.0574 h=0.4012 b=0.0024 | hash[min=0.016,max=0.983,dev=0.043] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 930ms/step eta=17.0min
+  [Stage1 e1  2550/3600] loss=0.0989 r=0.0612 h=0.3740 b=0.0032 | hash[min=0.014,max=0.984,dev=0.043] | lr=1.00e-04 scale=16384 skip=2 nf=0 | 929ms/step eta=16.3min
+[diag] 首个非有限损失诊断 -> img: finite=True, absmax=1 | mask: finite=True, absmax=1 | fg: finite=True, absmax=1 | bg: finite=True, absmax=1 | h_f: finite=True, absmax=0.981 | h_b: finite=False, absmax=nan | recon_f: finite=True, absmax=0.88 | hash: finite=False, absmax=nan | param: 所有参数有限
+[diag] 编码器 fg/fp16 复算 -> conv0: finite=True, absmax=1.42 | aff: finite=True, absmax=5.33 | hash_proj: finite=True, absmax=0.968
+[diag] 编码器 fg/fp32 复算 -> conv0: finite=True, absmax=1.43 | aff: finite=True, absmax=5.33 | hash_proj: finite=True, absmax=0.968
+[diag] 编码器 bg/fp16 复算 -> conv0: finite=True, absmax=1.22 | aff: finite=False, absmax=nan | hash_proj: finite=False, absmax=nan
+[diag] 编码器 bg/fp32 复算 -> conv0: finite=True, absmax=1.23 | aff: finite=True, absmax=5.72 | hash_proj: finite=True, absmax=0.972
