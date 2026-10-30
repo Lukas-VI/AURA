@@ -59,6 +59,12 @@ def apply_degradation(img_rgb: np.ndarray, level: str) -> np.ndarray:
         img_rgb = cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
         ok, buf = cv2.imencode(".jpg", img_rgb, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
         return cv2.imdecode(buf, cv2.IMREAD_COLOR) if ok else img_rgb
+    if level.startswith("blur"):                             # 高斯模糊 sigma=N：抹掉 SIFT 依赖的高频关键点
+        return cv2.GaussianBlur(img_rgb, (0, 0), float(level[4:]))
+    if level.startswith("lowres"):                           # 先降到 N×N 再插回：极端低分辨率
+        side = int(level[6:])
+        small = cv2.resize(img_rgb, (side, side), interpolation=cv2.INTER_AREA)
+        return cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
     if level in ("crop0.8", "crop0.7off", "zoom1.15"):       # 裁剪/放大类：让背景整体位移或缩放
         if level == "crop0.8":
             ch, cw = int(round(h * 0.8)), int(round(w * 0.8))
@@ -80,6 +86,33 @@ def apply_degradation(img_rgb: np.ndarray, level: str) -> np.ndarray:
         return cv2.warpAffine(img_rgb, m, (w, h), flags=cv2.INTER_LINEAR,
                               borderMode=cv2.BORDER_REPLICATE)
     raise ValueError(f"未知退化档位: {level}")
+
+
+def random_geom_degradation(img_rgb: np.ndarray, rng: np.random.Generator, max_deg: float = 12.0,
+                            smin: float = 0.7, smax: float = 1.3, max_shift: float = 0.08,
+                            cmin: float = 0.7) -> np.ndarray:
+    """随机几何退化（连续参数）：随机（非中心）裁剪 + 旋转/缩放/平移，边缘复制填充。
+
+    K 轮用它构造"查询"侧：参考 = 同源【干净真帧】，查询 = 同源伪造帧经此退化。二者背景逐像素
+    相同，故恰好相差一个单应 —— 这正是可微几何验证模块要检验的关系。参数连续（而非评测那 6 个
+    离散档位），避免模块把档位背下来。只动几何，不动光度：光度退化会削弱逐位置匹配的可靠性。
+    """
+    h, w = img_rgb.shape[:2]
+    if rng.random() < 0.7:                                   # 随机裁剪（含非中心），再插回原尺寸
+        r = float(rng.uniform(cmin, 1.0))
+        ch, cw = int(round(h * r)), int(round(w * r))
+        y0 = int(rng.integers(0, max(1, h - ch + 1)))
+        x0 = int(rng.integers(0, max(1, w - cw + 1)))
+        img_rgb = cv2.resize(img_rgb[y0:y0 + ch, x0:x0 + cw], (w, h), interpolation=cv2.INTER_LINEAR)
+    ang = float(rng.uniform(-max_deg, max_deg)) if rng.random() < 0.8 else 0.0
+    sc = float(rng.uniform(smin, smax)) if rng.random() < 0.8 else 1.0
+    dx = float(rng.uniform(-max_shift, max_shift) * w) if rng.random() < 0.5 else 0.0
+    dy = float(rng.uniform(-max_shift, max_shift) * h) if rng.random() < 0.5 else 0.0
+    m = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), ang, sc)
+    m[0, 2] += dx
+    m[1, 2] += dy
+    return np.ascontiguousarray(cv2.warpAffine(img_rgb, m, (w, h), flags=cv2.INTER_LINEAR,
+                                               borderMode=cv2.BORDER_REPLICATE))
 
 
 def _geom_aug(img_rgb: np.ndarray, mask: np.ndarray, rng: np.random.Generator):
@@ -280,10 +313,18 @@ class GroupBatchSampler:
 
     必须成组采样：均匀随机抽样下一个 batch 里几乎不可能出现两张同源图，监督对比损失的
     正样本项就恒为空。分组后每批既有正样本，也有足够多不同源可当负样本。
+
+    hard_neg_pair=True（本轮新增）：每批改为取 groups_per_batch//2 条视频、每条视频取
+    【两个不同源帧】各 samples_per_group 张。理由见 ContrastiveDataset 的 label_key 注释：
+    label_key=source_id 时正样本是"同一源帧的不同伪造方式"，而最难的负样本（同视频的
+    相邻帧，背景逐像素相同、只有人脸微动）在均匀组采样下几乎不会同批出现 —— 模型因此
+    从未被要求区分它们，帧级指标只能追平零训练描述子。把同视频两帧固定放进同一批，
+    就补上了这条监督信号。
     """
 
     def __init__(self, labels, groups_per_batch: int, samples_per_group: int,
-                 steps_per_epoch: int, seed: int = 42):
+                 steps_per_epoch: int, seed: int = 42, video_keys=None,
+                 hard_neg_pair: bool = False):
         self.groups_per_batch = int(groups_per_batch)
         self.samples_per_group = int(samples_per_group)
         self.steps_per_epoch = int(steps_per_epoch)
@@ -296,14 +337,46 @@ class GroupBatchSampler:
         self.keys = np.asarray(sorted(self.groups.keys()), dtype=np.int64)
         self.n_groups = len(self.keys)
 
+        self.hard_neg_pair = bool(hard_neg_pair)
+        self.videos = None
+        if self.hard_neg_pair:
+            assert video_keys is not None, "hard_neg_pair 需要 video_keys（每条样本的源视频号）"
+            vmap = {}
+            for i, lab in enumerate(labels):
+                v = str(video_keys[i]).split("_f")[0]
+                vmap.setdefault(v, set()).add(int(lab))
+            # 只保留至少有两个源帧的视频（否则配不出难负样本对）
+            self.videos = {k: np.asarray(sorted(s), dtype=np.int64)
+                           for k, s in vmap.items() if len(s) >= 2}
+            self.video_keys = np.asarray(sorted(self.videos.keys()))
+            assert len(self.video_keys) > 0, "没有可用于配对的视频"
+
     def set_epoch(self, epoch: int):
         self.epoch = int(epoch)
 
     def __len__(self):
         return self.steps_per_epoch
 
+    def _iter_hard_neg(self, rng):
+        n_pairs = max(1, self.groups_per_batch // 2)
+        for _ in range(self.steps_per_epoch):
+            picked = rng.choice(self.video_keys, size=min(n_pairs, len(self.video_keys)),
+                                replace=False)
+            idx = []
+            for v in picked:
+                labs = self.videos[str(v)]
+                pair = rng.choice(labs, size=2, replace=False)
+                for lab in pair:
+                    pool = self.groups[int(lab)]
+                    idx.extend(rng.choice(pool, size=self.samples_per_group,
+                                          replace=len(pool) < self.samples_per_group).tolist())
+            yield idx
+
     def __iter__(self):
         rng = np.random.default_rng(self.seed + self.epoch * 100003)
+        if self.hard_neg_pair:
+            yield from self._iter_hard_neg(rng)
+            return
         g = min(self.groups_per_batch, self.n_groups)
         for _ in range(self.steps_per_epoch):
             picked = rng.choice(self.keys, size=g, replace=False)     # 本批的源视频
@@ -314,3 +387,42 @@ class GroupBatchSampler:
                 idx.extend(rng.choice(pool, size=self.samples_per_group,
                                       replace=len(pool) < self.samples_per_group).tolist())
             yield idx
+
+
+class GeoPairDataset(Dataset):
+    """K 轮的可微几何验证训练对：查询 = 同源伪造帧（随机几何退化），参考 = 同源【干净真帧】。
+
+    正对：FF++ 伪造帧 X_Y 的背景来源就是 X 的同序号真实帧（source_path），二者背景逐像素相同、
+    只差人脸区，查询再做一次随机几何退化后，背景恰好相差一个单应 —— 几何模块应给高分。
+    负对：参考换成【另一个源】的真帧（在 train_one_epoch 里用 roll 错位配对），应为低分。
+
+    只读几何，不读身份：这里不引入任何身份标签，正/负完全由 FF++ 的"背景来源"结构决定。
+    """
+
+    def __init__(self, samples, image_size: int = 256, seed: int = 42, max_deg: float = 12.0,
+                 smin: float = 0.7, smax: float = 1.3, max_shift: float = 0.08, cmin: float = 0.7):
+        self.samples = [s for s in samples if s.get("source_path")]
+        self.image_size = int(image_size)
+        self.rng = np.random.default_rng(seed)
+        self.kw = dict(max_deg=max_deg, smin=smin, smax=smax, max_shift=max_shift, cmin=cmin)
+
+    def __len__(self):
+        return len(self.samples)
+
+    def _read(self, path: str) -> np.ndarray:
+        bgr = cv2.imread(path, cv2.IMREAD_COLOR)
+        if bgr is None:
+            raise FileNotFoundError(f"无法读取图片: {path}")
+        bgr = cv2.resize(bgr, (self.image_size, self.image_size), interpolation=cv2.INTER_AREA)
+        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+    def __getitem__(self, idx):
+        s = self.samples[idx]
+        q = random_geom_degradation(self._read(s["path"]), self.rng, **self.kw)
+        r = self._read(s["source_path"])                     # 参考保持干净（图库侧的归档真帧）
+
+        def to_t(a):
+            return torch.from_numpy(np.ascontiguousarray(a.transpose(2, 0, 1))).float().div_(255.0)
+
+        return {"query": to_t(q), "ref": to_t(r),
+                "identity": s["identity"], "source_id": s["source_id"]}

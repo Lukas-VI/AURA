@@ -1,0 +1,106 @@
+<mxfile host="app.diagrams.net" modified="2026-10-29T00:00:00.000Z" agent="AURA" version="24.7.17" type="device">
+  <diagram id="fig3-dense" name="fig3_dense_protocol">
+    <mxGraphModel dx="1000" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="520" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="q" value="伪造帧 q（Deepfakes／Face2Face／FaceSwap）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="30" y="20" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="gtset" value="真值：GT(q) = { g 与 q 同视频，d(q,g) ≤ d_min(q) + δ }&#10;d(q,g) = 1 − cos( r8(q), r8(g) )" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="560" y="20" width="360" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="lab" value="视频 X 的连续 100 帧（自第 100 帧起，25 fps）" style="text;html=1;align=left;fontSize=11;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="30" y="105" width="340" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="strip" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="30" y="130" width="860" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t1" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="73" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t2" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="116" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t3" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="159" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t4" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="202" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t5" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="245" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t6" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="288" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t7" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="331" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t8" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="374" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t9" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="417" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t10" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="460" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t11" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="503" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t12" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="546" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t13" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="589" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t14" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="632" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t15" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="675" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t16" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="718" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t17" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="761" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t18" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="804" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="t19" style="line;strokeWidth=1;html=1;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="847" y="130" width="1" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="eq" style="edgeStyle=none;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#b85450;" edge="1" parent="1" source="q" target="t11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="b1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="506" y="205" width="33" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="b1l" value="δ = p50（0.0008）→ GT 中位 3.8 帧｜随机基线 3.8%" style="text;html=1;align=left;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="550" y="207" width="380" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="b2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="506" y="265" width="200" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="b2l" value="δ = p90（0.0060）→ GT 中位 23.2 帧｜随机基线 23.2%" style="text;html=1;align=left;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="716" y="267" width="220" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="b3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="506" y="325" width="324" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="b3l" value="δ = p95（0.0119）→ GT 中位 37.7 帧｜随机基线 37.7%" style="text;html=1;align=left;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="506" y="352" width="380" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="noteA" value="为什么不用帧号相等：换脸会改变节奏，最近帧的帧号偏移中位 2、p90 12；静止段相邻帧在视觉上不可分。&#10;因此把命中定义为相似度区间，而不是固定帧号。" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="30" y="400" width="700" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="noteB" value="r8 仅用于定义真值，&#10;不作为检索方法报告" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#f5f5f5;strokeColor=#999999;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="750" y="400" width="180" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

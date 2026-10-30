@@ -1,0 +1,74 @@
+# AURA · §6.2 第 2 条：网格级对比损失（I-best + 逐位置跨样本 SupCon）
+#
+# 动机
+# ----
+# 8 选 1 诊断（runs/within_video_full.json）已表明：学习编码器与零训练 r8_norm 在
+# "同视频挑对那一帧"上持平（59.79% 对 60.11%），且难负样本配对训练也未能突破
+# （runs/train_full_spatial_hn.log）。剩下的解释是【比较形式】：全局向量只判"整体像不像"。
+#
+# 本配置的唯一改动：在 head 之前把 8×8 网格按位置拆开，逐位置做一次 SupCon
+# （grid_supcon_loss）：同一源帧（不同伪造方式）在每个格子上都应当靠近，
+# 同视频其他帧应当远离。相当于把 r8_norm 的有效性显式迁移进网络，但保留可学习表征。
+#
+# 其余超参、数据管线、评估协议与 I-best 逐项相同，便于逐 epoch 对比。
+#
+# 用法（项目根目录 d:\py\AURA 下）：
+#   E:\conda\envs\pytorch\python.exe -m aura.train --config aura/configs/aura_full_spatial_grid.yaml
+name: 'aura_full_spatial_grid'
+
+# ---------- 数据 ----------
+image_size: 256
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（与 I-best 相同） ----------
+embed_dim: 2048
+base_channels: 64
+num_branches: 5
+num_rb: 5
+num_scales: 2
+aff_channels: 512
+grad_checkpoint: false
+
+# ---------- 空间保留嵌入头（网格级对比依赖它）----------
+spatial_head: true
+pool_grid: 8               # 8×8 网格 × 32 通道 = 2048
+
+# ---------- 对比学习 ----------
+groups_per_batch: 2
+samples_per_group: 2
+queue_size: 4096
+label_key: 'source_id'
+tau: 0.2
+lambda_vicreg: 1.0
+
+# ---------- 本轮新增：网格级对比 ----------
+grid_contrast: true        # 逐位置 SupCon（aura/losses.py: grid_supcon_loss）
+lambda_grid: 0.5           # 网格损失的权重
+tau_grid: 0.1              # 网格描述子的温度（32 维、逐位置归一化，故比全局 0.2 更低）
+
+# ---------- 人脸掩膜擦除（关闭，与 I-best 相同）----------
+erase_prob: 0.0
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'
+use_multiscale_skip: false
+
+# ---------- 训练（与 I-best 逐项相同）----------
+steps_per_epoch: 800
+epochs: 3
+lr: 0.00002
+weight_decay: 0.0001
+warmup_ratio: 0.4
+amp: false
+cudnn_benchmark: false
+clip_grad_norm: 5.0
+num_workers: 0
+eval_batch_size: 4
+log_interval: 20
+eval_every_epoch: 1
+degradation_eval: 'none'
+
+# ---------- 保存 / 日志 ----------
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'

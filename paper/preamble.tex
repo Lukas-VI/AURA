@@ -1,0 +1,30 @@
+% ============================================================
+% AURA 论文 导言区：宏包与自定义命令
+% ============================================================
+\usepackage{geometry}
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+% 图 / 表路径
+\graphicspath{{figures/}{figs/}}
+
+% 常用记号
+\newcommand{\aura}{AURA}
+\newcommand{\sourceid}{\texttt{source\_id}}
+\newcommand{\chead}[1]{\textbf{#1}}
+\newcommand{\etal}{\textit{et al.}}
+
+% 图注 / 表注更紧凑
+\captionsetup{font=small,labelfont=bf,skip=4pt}
+
+% 代码 / 档位名等宽体
+\newcommand{\code}[1]{\texttt{#1}}

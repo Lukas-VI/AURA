@@ -37,6 +37,33 @@ def supcon_loss(z, labels, queue_z=None, queue_labels=None, tau: float = 0.1):
     return per_anchor[valid].mean()
 
 
+def grid_supcon_loss(cells, labels, tau: float = 0.1):
+    """网格级监督对比损失：在每个空间位置上各自做一次 SupCon。
+
+    动机（第 5.3 节证据 + 8 选 1 诊断）：整图对比学习只要求"整张图 -> 一个向量"可分，
+    同一视频相邻帧的差异在池化/线性混合后被平均掉；而 \code{r8\_norm} 之所以能到 60%，
+    正是因为它保留了 8×8 的逐格灰度。这里把 head 之前的 8×8 网格按【位置】拆开，
+    在同一位置上做跨样本对比：同一源帧（不同伪造方式）应当靠近，同视频其他帧应当远离。
+    于是模型被直接要求"每个格子都具备区分近重复帧的能力"，而不是把这件事交给一个全局向量。
+
+    cells  : (N, G*G, D) 已逐位置 L2 归一化的网格描述子（N=批内样本数）
+    labels : (N,) 与主对比损失相同的帧级标签（source_id）
+    """
+    n, g2, d = cells.shape
+    sim = torch.einsum("ngd,mgd->gmn", cells, cells) / tau      # (G², N, N)
+    self_mask = torch.eye(n, dtype=torch.bool, device=cells.device)
+    pos_mask = ((labels[:, None] == labels[None, :]) & (~self_mask)).expand(g2, n, n)
+    logits = sim.masked_fill(self_mask[None], -1e4)
+
+    log_prob = logits - torch.logsumexp(logits, dim=2, keepdim=True)
+    n_pos = pos_mask.sum(dim=2)                                  # (G², N)
+    valid = n_pos > 0
+    if not bool(valid.any()):
+        return cells.sum() * 0.0                                 # 无正样本：返回 0 但保留计算图
+    per_anchor = -(pos_mask * log_prob).sum(dim=2) / n_pos.clamp(min=1)
+    return per_anchor[valid].mean()
+
+
 def variance_loss(z, gamma: float = None, eps: float = 1e-4):
     """VICReg 式方差铰链项：要求每个维度在批内的标准差至少为 gamma，防止嵌入坍缩。
 

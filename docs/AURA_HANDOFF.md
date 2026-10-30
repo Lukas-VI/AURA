@@ -1,8 +1,8 @@
 # AURA 项目 Handoff（交接说明）
 
 > 目的：把项目现状、已提出的全部 idea、关键数字与已知瓶颈压缩成一页，便于交给外部（更强的）AI 评估或接手。
-> 日期：**2026-10-17（第三轮：自建单编码器）**｜阶段：**自建线已重启并在跑** —— 10-16 的"停止造模型"裁决被用户推翻，理由见 §3.2 注。
-> 相关文件：[研究方向评估与实现方案.md](file:///d:/py/AURA/docs/AURA_研究方向评估与实现方案.md)、[Retrieval方向备份提案与迭代计划.md](file:///d:/py/AURA/docs/AURA_Retrieval方向备份提案与迭代计划.md)、[README.md](file:///d:/py/AURA/README.md)
+> 日期：**2026-10-20（自建线 A–K2 共 11 轮 + 方案 B 两阶段重排器 + 探索 1/2 + open-set 协议）**｜阶段：**基线已冻结；自建线 A–K2 与方案 B 已完成，转【路线 B：benchmark / 分析论文框架】**
+> 相关文件：[研究方向评估与实现方案.md](file:///d:/py/AURA/docs/AURA_研究方向评估与实现方案.md)、[Retrieval方向备份提案与迭代计划.md](file:///d:/py/AURA/docs/AURA_Retrieval方向备份提案与迭代计划.md)、[模型结构图.md](file:///d:/py/AURA/docs/AURA_模型结构图.md)、[README.md](file:///d:/py/AURA/README.md)
 
 ***
 
@@ -12,23 +12,26 @@
 
 ***
 
-## 2. 现状：做了什么、没做什么（2026-10-17 重写）
+## 2. 现状：做了什么、没做什么（2026-10-20 重写）
 
 **在做的事**：
 
 1. `baseline/` —— 复现 Liu et al. 2026《Deep hashing framework for proactive deepfake retrieval and detection》（下称 HashVAE）。**已冻结为"保真度样本"，不再改动。**
-2. `aura/` —— **自建单编码器 AURA**：整图输入、单阶段端到端、监督对比学习，全量规格 256px / embed 2048。这是当前唯一在推进的线。
+2. `aura/` —— **自建单编码器 AURA**：整图输入、单阶段端到端、监督对比学习，全量规格 256px / embed 2048。已完成 **A–K2 共 11 轮**训练 + 一轮**两阶段重排器**评估（方案 B）。
 
 **技术状态**：
 
-- `aura/` 已完成两轮 6-epoch 全量训练（identity 监督 / source_id 监督），第三轮（identity + 人脸掩膜擦除 + 多尺度跳连）进行中。
+- `aura/` 的探索顺序：A（identity 粗粒度）→ B（细粒度，作废）→ C（擦除+跳连，崩盘）→ D（擦除单变量）→ E（稳训细粒度）→ **F（几何增强，反效果）** → **G（低层蒸馏，零增益）** → **H（去 GAP，+12pp 跃升）** → **I（稳训，best 59.68%）** → **J（冻结 backbone，验证回落成因）** → **K/K2（几何损失进网络，双重证伪）**。
+- **结论已闭合**：帧级瓶颈是 **head 前的 GAP**（去掉后 e1 从 46% 级跃到 58~60%），但队列灌满后梯度持续侵蚀空间布局（H/I 两轮都 e1 最高、之后单调回落）；**几何一致性损失当辅助项训进网络无效**（K 58.71 / K2 57.96，均低于 I-best 59.68）。
+- **方案 B 终局**：改为**两阶段检索器**——廉价初筛 top-K → 候选内用**自研可微几何模块**重排（全链无 SIFT/RANSAC）。结果与经典 SIFT+RANSAC 只差 **−1.1pp**（§3.11），且 σ/temp 网格扫描证明**调参补不上**这个缺口（§3.12）⇒ **定位为"持平经典的等价替代"（工程贡献），不再追绝对数值反超**。
+- **路线定位（2026-10-20 用户拍板，保守方案）**：放弃"方案 B 反超经典"，改走 **benchmark / 分析论文框架** —— 以【任务定义 + 退化协议 + **open-set 拒识** + GAP 瓶颈分析 + 零训练上限探测 + 可微几何重排器（持平、含负结果）】立篇，**不靠单一绝对数值**。探索 1/2 的负结果（σ 假设证伪、几何目标训练双重失败）作为诚实的消融与失败模式写进方法章。
 - 已修掉的坑：AMP fp16 前向 NaN、训练/评估 OOM、Windows 共享内存 thrash、嵌入坍缩。手段：梯度检查点、编码器整段 fp32（放弃 AMP）、关闭 cuDNN autotune、迷你批 BN 破初始对称、XBM 4096 队列常驻 CPU、`eval_batch_size=4`。
-- 评测协议已冻结进 [eval.py](file:///d:/py/AURA/aura/eval.py)：图库 = 测试集真实帧（1600），查询 = 测试集伪造帧（8000），同时报帧级与视频级、余弦与汉明两套读数。
+- 评测协议已冻结进 [eval.py](file:///d:/py/AURA/aura/eval.py)：图库 = 测试集真实帧（1600），查询 = 测试集伪造帧（8000），同时报帧级与视频级、余弦与汉明两套读数；几何七档与光度六档各一套（只对查询退化）；新增 **open-set 拒识**（§3.14：图库/查询按视频切闭集/开集，报 AUC 与 TPR@FPR）。
 
 **没有做的事（重要）**：
 
-- **AURA 的增量目前仍是"复现 + 工程"，不是方法贡献。** [Retrieval 文档 §0.2](file:///d:/py/AURA/docs/AURA_Retrieval方向备份提案与迭代计划.md) 的划界结论没变：模型结构侧（编码器 / 掩膜 / 检测头）没有我们的发明。
-- 那份划界还有一个副作用：AURA 真正能立住的增量只剩**任务 / 协议 / 溯源层**（⑩①②），而这三条**一条都还没做完**（完成度见 §4.3）。
+- **AURA 的增量目前仍是"复现 + 工程 + 协议"，不是方法贡献。** [Retrieval 文档 §0.2](file:///d:/py/AURA/docs/AURA_Retrieval方向备份提案与迭代计划.md) 的划界结论没变：模型结构侧（编码器 / 掩膜 / 检测头）没有我们的发明。
+- 那份划界还有一个副作用：AURA 真正能立住的增量只剩**任务 / 协议 / 溯源层**（⑩①②）。现状：**#2 退化基准**与 **#10 协议**（含本轮补上的 open-set 拒识，§3.14）已补齐大半；**#1 溯源图**仍零进展（完成度见 §4.3）。
 
 ***
 
@@ -182,18 +185,22 @@
 正样本定义 = **同一张真实图的不同攻击版**（与我们 B 轮的 source_id 一致）。
 **他们反复强调的核心工程差距：Stage1 对前景和背景都做像素级 L2 重构，我们没有这个约束。**
 
-### 3.6 kill 判据（统一，2026-10-17）
+### 3.6 kill 判据（统一；**2026-10-18 已上移**）
 
 此前文档里有三条互相打架的口径，现统一如下（自建线专用；基线复现线不适用）：
 
 | 线 | 阈值（帧级 Top-1） | 性质 | 处置 |
 | --- | --- | --- | --- |
-| **硬线** | **> 58.80%**（零训练 tiny32 整图，同协议同图库） | 唯一裁决线 | 不过则"训练出来的模型打不过零训练曲线"，自建线无存在理由 |
+| **硬线（现行）** | **> 60.05%**（零训练 `r8_norm`：8×8 逐图标准化缩略图，仅 192 维，同协议同图库） | 唯一裁决线 | 不过则"训练出来的模型打不过零训练曲线" |
+| 参考线 | > 60.62%（零训练 `r32_norm + 4*huehsv` **相似度矩阵级融合**） | 只作参考 | 融合版不是单条确定性描述子，不适合当门线 |
+| ~~旧硬线~~ | ~~> 58.80%~~（零训练 tiny32 整图） | **已被取代** | 2026-10-18 手工描述子扫描把零训练上限从 58.71% 推到 60.05%，旧线失去判别力 |
 | 软线 | > 49.34%（零训练 pHash64 背景） | 只作参考 | 只说明"比感知哈希强"，不足以支撑自建线 |
-| ~~旧线~~ | ~~> 0.35~~（原 Retrieval §7） | **作废** | 写于"二值码哈希"语境，与连续嵌入 + 帧级 Top-1 口径不同量纲；且它低于 49.34%，会给出"47.75% 仍存活"的矛盾结论 |
+| ~~旧线~~ | ~~> 0.35~~（原 Retrieval §7） | **作废** | 写于"二值码哈希"语境，与连续嵌入 + 帧级 Top-1 口径不同量纲 |
 | ~~旧线~~ | ~~视频级 Top-1 ≥ 99%~~ | **作废** | 免训练方法已达 99.75%，无区分度 |
 
-代码位置：[train.py](file:///d:/py/AURA/aura/train.py) 的 `KILL_LINES`。
+代码位置：[train.py](file:///d:/py/AURA/aura/train.py) `KILL_LINES = {"r8_norm_单描述子": 0.6005, "r32_norm+4*huehsv_融合": 0.6062}`；扫描读数落 [probe_protocol_ceiling.json](file:///d:/py/AURA/aura/runs/probe_protocol_ceiling.json)。
+
+> **⇒ 对 §3.10/§3.11 的直接后果**：自建线最好成绩 I-best **59.68% 仍未过现行硬线 60.05%**（H e1 58.45% 更远）。此前"越过 58.80%"的表述只在旧线下成立，已在 §3.10 更正。
 
 > **判据合法性已复核（2026-10-18）**：用户提出"是不是算 kill 时没把同视频其余帧当负样本"。逐行核对后**排除**：帧级用的是**精确帧号**，不是"同视频即命中"——
 > [eval.py `_score`](file:///d:/py/AURA/aura/eval.py#L47-L65) 帧级判据 `q_srcs[i] in retrieved`，其中 `q_srcs` 取伪造帧的 `source_id`、`retrieved` 取图库真实帧的 `id`；[dataset.py L117-133](file:///d:/py/AURA/baseline/data/dataset.py#L117-L133) 定义真实帧 `id = source_id = X_f{帧号:03d}`（伪造帧的 `source_id` 同值）；[\_verify_shortcut.py `report`](file:///d:/py/AURA/aura/runs/_verify_shortcut.py#L68-L73) 用 `db_src[idx] == q_src[:,None]` 独立复算，两条路径口径一致。**58.80% 是精确帧匹配得到的，没有被抬高。**
@@ -241,7 +248,7 @@
 
 记原图 `x = (b, f)`（b = 背景像素，f = 人脸像素）。查询 `q = (b, f_Y)`（供体 Y 的脸），其答案 `a = (b, f_X)`（源 X 原本的脸）——**二者背景 b 逐像素相同**，只差 f。
 
-**(1) 该判据下"最优统计量"就是低层匹配。** 检索只需分辨"哪张库图与 q 共享 b"。既然 b 逐像素相同，任何保形性足够的低层描述子 φ 都满足 `d(φ(q), φ(a)) ≈ 0` 且严格小于到其余库图的距离 —— 32×32 缩略图正是 φ 的一个廉价实现。⇒ **58.80% 不是"零训练算法很神"，而是它就是这个判据的近似最优解。**
+**(1) 该判据下"最优统计量"就是低层匹配。** 检索只需分辨"哪张库图与 q 共享 b"。既然 b 逐像素相同，任何保形性足够的低层描述子 φ 都满足 `d(φ(q), φ(a)) ≈ 0` 且严格小于到其余库图的距离 —— 32×32 缩略图正是 φ 的一个廉价实现。⇒ **58.80% 不是"零训练算法很神"，而是它就是这个判据的近似最优解**（注：2026-10-18 手工描述子扫描把这条上限进一步推到 `r8_norm` 的 **60.05%**，论证不变 → 见 §3.6）。
 
 **(2) 深度模型优化的是另一个目标，二者不矛盾。** `identity` 监督把"帧号 t"显式设成 nuisance 变量（同视频 8 帧互为正样本），该损失的全局最优满足 **I(z; t | X) = 0**。因此训练越充分、帧级精度越可能**下降** —— D 轮 e5 47.56 → e6 46.91 正对此现象。深度模型不是"更弱的估计器"，而是**另一个目标函数的最优解**：它更擅长自己的目标（视频级 99.4%），低层匹配器更擅长判据的目标。
 
@@ -256,8 +263,156 @@
 **B 轮的悬案已由 E 轮结清**：细粒度并非"双输"，降 lr + 加长 warmup 后它**稳定**了，但仍**没买到精度**（46.44 < 47.75）。细粒度的真正难点是"同视频相邻帧"这种近乎相同的极难负样本（"批内正样本为 0"的猜想已被实测排除）。
 
 **出路只有两条（需用户拍板，见 §6 第 1-2 条）**：
-- **(a) 架构去 GAP**：head 改为保留空间网格的描述子（如 8×8 池化后 flatten + 线性投影，或 `GAP ⊕ 空间网格` 拼接）；结构级改动、需单独一轮单测、有显存风险。
+- **(a) 架构去 GAP**：head 改为保留空间网格的描述子（如 8×8 池化后 flatten + 线性投影，或 `GAP ⊕ 空间网格` 拼接）；结构级改动、需单独一轮单测、有显存风险。**→ 已在 H/I 两轮执行，见 §3.10（结论：有效，+12pp）。**
 - **(b) 重定位判据/叙事**：承认"帧级 Top-1 vs 像素模板"是错配判据，主报**视频级 + 帧 Top-5 + 退化鲁棒曲线**，并突出**汉明 ≈ 余弦（二值化几乎无损）**这一硬数据。
+
+### 3.10 自建线 F–K2 轮读数（2026-10-19~20，几何协议 + 架构级探索）
+
+协议同 §3.0；每轮均为**单变量**改动（除标注）。除注明外：256px / embed 2048 / M=5 / D=5 / 64ch / aff 512 / batch 4 / 800 步/轮。
+读数取自各轮 `*_history.json` 的 **clean 档余弦帧级 Top-1**（几何七档由 [\_eval_geom_model.py](file:///d:/py/AURA/aura/runs/_eval_geom_model.py) 单独跑）。
+
+| 轮 | 配置 | 唯一变量 | 帧 T1（余弦） | 判读 |
+| --- | --- | --- | --- | --- |
+| F | `aura_full_geo.yaml` | 打开几何增强 `geom_aug`（旋转/缩放/平移） | 32.16（e1）→ **37.81（e6）** | **反效果**：几何增强要求对全局布局不变，而帧级线索恰在全局布局里 |
+| G | `aura_full_distill.yaml` | 低层蒸馏（教师 = r8_norm，2048→192 投影头，λ=0.5） | 35.23 → **47.04（e6）** | 路线 A，e6 仍略低于 A 轮 47.75 ⇒ **零增益** |
+| H | `aura_full_spatial.yaml` | **去 GAP**：pool 段改 8×8 空间网格（8×8×32=2048） | **58.45（e1）** → 53.20（e2）→ 52.21（e3） | **验证了 §3.9 的 GAP 诊断**：单轮 +12pp；但训练不稳、e2 起回落 |
+| I | `aura_full_spatial_i.yaml` | H + 稳训（lr 5e-5→2e-5、warmup 0.2→0.4、取 best） | **59.68（e1 best）** → 58.71（e2）→ 57.86（e3） | 跌幅从 −5.25pp 压到 −0.9pp，但**趋势未消除**；best 59.68 仍**未过现行硬线 60.05%**（见结论 2） |
+| J | `aura_full_spatial_j.yaml` | 冻结 backbone，只训 pool+head（从 I-best 起） | 55.46（e1） | 冻结后仍回落（−4.2pp）⇒ 回落**不**来自 backbone 被侵蚀，而来自 head 读法漂移 |
+| K | `aura_full_geo_k.yaml` | **local_head + 几何损失进网络**（λ_geo=1.0，从 I-best 起） | 58.71（e1） | 未涨（低于 I-best 59.68） |
+| K2 | 同 K，改从 `_geo_k_preheat.pth` 起 | 预热 local_head 后重跑 | 57.96（e1） | 再次未涨 ⇒ **几何损失进网络被双重证伪** |
+
+**F–K2 的五条结论**：
+
+1. **GAP 诊断成立**（H 轮）：去掉 head 前的全局平均池化，clean 帧级从 46% 级一次跃到 **58.45%**（e1），I 轮 best 到 **59.68%** —— 约 +12pp，是自建线唯一的架构级跃升。
+2. **现行硬线（60.05%）在 e1 即已接近、但未越过**：H e1 58.45%、I e1 59.68%（两者均 < 60.05%）；两轮都是 **e1 最高、之后回落**，故"是否越过硬线"取决于口径是 best-epoch 还是末轮 —— 现行口径下两个口径都过不了。
+3. **回落成因收窄**：J 轮冻结 backbone 后仍回落 ⇒ 不是 backbone 被 SupCon 侵蚀，而是 **head 在读一组空间特征时"读法"持续漂移**；XBM 队列灌满（4096）后负样本陡增是诱因。
+4. **几何增强与帧级判据天然冲突**（F 轮，clean −8.65pp），与 §3.9 第 4 条"独立增强与判据冲突"一致。
+5. **几何损失不能当辅助项训进网络**（K/K2）：几何支路的梯度只能经 `forward_local` 的 conv0 + scales[0] 回传、够不到 AFF/pool/head（判别力所在）；几何支路分离度从 0.001 升到 0.506，检索 T1 反而越低。
+
+> **I-best 在几何七档上的读数**（[geom_model_spatial_i_best.json](file:///d:/py/AURA/aura/runs/geom_model_spatial_i_best.json)，余弦帧级）：
+> clean **59.675** / crop0.8 21.70 / crop0.7off 7.975 / zoom1.15 32.1375 / rot5 46.8375 / rot10 32.7125 / shift8 35.45。
+> 即"去 GAP"只解开了 clean，**几何档仍远低于经典管线** —— 这直接催生了 §3.11 的两阶段重排器。
+
+### 3.11 方案 B 终局：两阶段重排器（可微几何模块替代 SIFT+RANSAC）
+
+把"几何验证"从**训练期损失**改为**检索期打分器**：初筛拿 top-K 候选 → 候选内用 [geo.py `pair_score`](file:///d:/py/AURA/aura/geo.py) 重排。
+`pair_score` 全链可微、**无 SIFT/RANSAC**：软互最近邻匹配（softmax 替代硬 argmax + Lowe ratio）→ 软期望对应点 → 加权可微 DLT（`torch.linalg.lstsq`，固定 h33=1）→ 软内点占比作分。
+
+脚本 [\_eval_two_stage_geo.py](file:///d:/py/AURA/aura/runs/_eval_two_stage_geo.py)（新建）。口径：`n_query=300`（与经典管线 [\_probe_geom_invariant.py](file:///d:/py/AURA/aura/runs/_probe_geom_invariant.py) **同一查询子集**）、初筛 = r8_norm ⊕ I-best 深度嵌入（逐查询 z-score 融合，`w_r8=0.5`）、K 嵌套扫描、grid 32²（N=1024）、temp=0.05 / sigma=0.08。两个特征源：`local_head`（K 轮进网络的局部头）与 `local`（独立训练的 `LocalDescriptor`）。
+
+| 档位 | 初筛单独 T1 | local_head 纯几何 T1（K=100 / 300） | **local（独立）纯几何 T1（K=100 / 300）** | 经典 SIFT+RANSAC（K=100 / 300） |
+| --- | --- | --- | --- | --- |
+| clean | 60.00 | 66.00 / 66.00 | 67.00 / 67.00 | 70.67 / 70.67 |
+| crop0.8 | 25.00 | 64.00 / 64.67 | 68.00 / 69.00 | 67.67 / 68.00 |
+| crop0.7off | 5.67 | 46.67 / 54.33 | 50.00 / 57.67 | 49.33 / 56.67 |
+| zoom1.15 | 38.00 | 65.67 / 65.67 | 69.67 / 69.67 | 67.67 / 67.67 |
+| rot5 | 46.67 | 66.67 / 66.67 | 68.33 / 68.33 | 70.00 / 70.00 |
+| rot10 | 33.00 | 65.67 / 65.67 | 68.67 / 68.67 | 68.33 / 68.33 |
+| shift8 | 33.67 | 64.33 / 64.33 | 65.33 / 65.33（融合 w=0.7 → 66.67） | 71.67 / 71.67 |
+| **均值（K=300）** | 34.57 | 63.91 | **66.52** | **67.57** |
+
+**四条结论**：
+
+1. **可微几何模块能替代 SIFT+RANSAC，代价 ≈ −1.1pp**（local 66.52 vs 经典 67.57），且 **7 档里 4 档反超**；明显缺口只在 shift8（−6.3pp）与 clean（−3.7pp）。
+2. **重排器本体判别力与经典持平**：候选择对的条件 Top-1（cond@1）我们 63~70%、经典 62~72% ⇒ 差距**不在重排器**。
+3. **残差几乎全落在初筛召回**：`crop0.7off` 的 recall@300 仅 **91.33%**（唯一大缺口）；融合初筛分基本无增益（最优 w 多为 1.0 纯几何）。
+4. **几何分在候选集内高度可判**：正 0.45~0.79 / 负 ~0.05，逐查询成对 AUC 99.6~99.7%。注意该统计被大量"易分负样本"稀释，**不等于 cond@1 高**；残余误差集中在"同视频相邻帧"这种近重复混淆（SIFT 也解决不了）。
+5. `local`（独立 `LocalDescriptor`）在**全部 7 档**上 ≥ `local_head`，与预热点检读数一致 ⇒ 局部描述子应当**独立训练**，而非挂在主干上跟检索头联合训。
+
+> 产物：`aura/runs/two_stage_geo_local.json` / `.log`、`aura/runs/two_stage_geo_local_head.json` / `.log`；
+> 对照基线（经典不可微）为 `aura/runs/geom_invariant_final.json`。
+> **调参假设已执行并证伪**：见 §3.12 —— sigma **越大越好**（0.08 在四个 temp 上均最优），temp 0.01/0.03/0.05 近乎无差；最优均值 66.52（纯几何）/66.90（融合）仍不及经典 67.57。
+
+### 3.12 参数敏感性：几何模块 sigma / temp 网格扫描（探索 1，**σ 假设证伪**）
+
+§3.11 遗留的调参假设（"sigma 过大 ⇒ 软内点失效 ⇒ 减小 sigma 能涨"）本轮直接用网格扫描裁决。
+脚本 [\_scan_geo_params.py](file:///d:/py/AURA/aura/runs/_scan_geo_params.py)（新建，**纯推理、不重训**），结果
+[scan_geo_params_local.json](file:///d:/py/AURA/aura/runs/scan_geo_params_local.json)。口径与 §3.11 逐项对齐：
+`n_query=300`（同一子集）、`features=local`（独立 `LocalDescriptor`）、初筛 fuse、K 嵌套 100/300、grid 32²。
+实现上把与 sigma 无关的中间量（软匹配 `w` / 软对应点 `b_hat` / DLT 解 `h`）按 temp 外层算一次，
+sigma 内层只重算 `geom_score` ⇒ 3 个 temp 只重活 3 次而非 12 次。
+
+| temp \ sigma | 0.02 | 0.04 | 0.06 | **0.08** |
+| --- | --- | --- | --- | --- |
+| 0.01 | 61.05 / 61.67 | 64.57 / 64.76 | 65.76 / 65.90 | **66.14 / 66.38** |
+| 0.03 | 62.71 / 63.05 | 64.95 / 65.38 | 66.05 / 66.33 | **66.52 / 66.90** |
+| 0.05 | 62.90 / 63.14 | 65.38 / 65.62 | 66.10 / 66.52 | **66.52 / 66.76** |
+| 0.1 | 58.57 / 59.14 | 63.52 / 63.62 | 64.81 / 65.00 | **65.19 / 65.24** |
+
+（每格 = `纯几何 T1 均值 / best_w 融合 T1 均值`，7 档平均；`t=0.05, σ=0.08` 复现 §3.11 文档值 66.52 逐位一致。）
+
+**四条结论**：
+
+1. **σ 假设证伪**：σ **越大越好**，0.08 在四个 temp 下**都是各自最优**（单调 0.02→0.08 递增）；"σ=0.08 过大、软内点失效"不成立 —— 恰恰相反，放宽 σ 到 0.08 已是当前最优档，再往上未扫。
+2. **temp 影响很小**：0.01 / 0.03 / 0.05 三档近乎无差（最优均值同为 66.52），0.1 明显掉（58.6~65.2）；软互最近邻的软硬程度不是瓶颈。
+3. **调参不能补上缺口**：全网格最优均值 = 纯几何 **66.52** / 融合 **66.90**，仍 < 经典 SIFT+RANSAC **67.57** ⇒ §3.11 的 −1.1pp 差距**不是 sigma/temp 没调好**，来源在初筛召回与 shift8。
+4. **shift8 仍是唯一系统性缺口**：最优档（t=0.05/σ=0.08）逐档 clean 67.0 / crop0.8 69.0 / crop0.7off 57.67 / zoom1.15 69.67 / rot5 68.33 / rot10 68.67 / **shift8 65.33**（经典 71.67），其余 6 档已全部 ≥ 经典。
+
+> 读数落 [scan_geo_params_local.json](file:///d:/py/AURA/aura/runs/scan_geo_params_local.json)（含按 combo 的逐档明细与 `summary`）。
+> **意义**：这条把"方案 B 还能靠调参反超经典"的期望**关闭**，支持路线 B 的定位 —— 可微几何重排器**只持平经典**，不作"反超"卖点（见 §2 现状）。
+
+***
+
+### 3.13 两种训练失败模式：几何目标训独立局部描述子（探索 2，**双重否定**）
+
+动机：§3.11 发现"独立训练的 `LocalDescriptor` 在所有档 ≥ 挂主干的 `local_head`"，于是想把它从"无标注稠密对应（InfoNCE）"改成"**直接用几何目标训**"——目标是可微几何模块的分数，梯度全链直达。
+脚本 [\_train_local_desc_geo.py](file:///d:/py/AURA/aura/runs/_train_local_desc_geo.py)（新建；临时权重 / 日志已删）。
+两种起法**都失败**，且失败模式不同：
+
+| 起法 | 现象 | 判读 |
+| --- | --- | --- |
+| **① 从 InfoNCE 权重 `local_desc.pth` 微调** | 起步 `s_pos=0.677 / s_neg=0.040` ⇒ 分离 **0.637 ≫ margin 0.3**，`geo_consistency_loss`（铰链）**恒为 0、梯度恒为 0**；换 `rank` 损失（pair-score 当 logits 做交叉熵）后，lr∈{1e-4,3e-4} × temp_rank∈{0.05,0.1} 三组 **loss 不降**，`s_pos` 反而从 0.71 **掉到 0.59~0.67** | 目标**已饱和**：InfoNCE 描述子在几何目标上本就接近上限，再训只会把它推坏 |
+| **② 随机初始化** | `s_pos ≈ s_neg ≈ 0.95` —— **退化塌陷**：`geom_score` 被"平凡恒等解"满足（随机权重下分数已 ≈0.8），正负对分不开 | 目标**存在退化解**：软内点占比可被恒等映射（h=I）刷满，与"是否真对齐"无关 |
+
+**根因（两条）**：① **随机负样本太易** —— 同批其它源真帧与查询差异过大，信号早被现有描述子吃尽，梯度无处可去；② **目标本身可退化解** —— 软内点占比不惩罚"平凡对齐"，退化塌陷是结构性的，不是初始化运气。
+
+**结论**：几何一致性目标**继续只在检索期当打分器**（§3.11 路线 B），**不再试图把它训成损失**。至此，"几何进网络"这条路已被 **K / K2（当辅助项）与探索 2（当唯一损失、独立网络）三方独立证伪**。
+
+> 探索 2 的两点副产品：(a) 记录了一个可复现的**饱和现象**（分离度 ≫ margin ⇒ 铰链零梯度），提示任何"铰链式分离目标"都要先查起步分离度；(b) 独立 `LocalDescriptor` 应当继续用 InfoNCE 训（`local_desc.pth` 不动）。
+
+***
+
+### 3.14 open-set 拒识协议（HashVAE 与两家免训练基线都没有的指标）
+
+闭集协议的隐含假设是"待查伪造图的源图一定在库里"；真实取证场景里多数查询的源头**根本不在库中**，系统必须先判"这条查询库里没有归宿"。本协议把这层补上。
+实现 [eval.py `evaluate_openset`](file:///d:/py/AURA/aura/eval.py) / `format_openset` / `_auc_rank`（**追加，不改现有函数**），脚本 [\_eval_openset.py](file:///d:/py/AURA/aura/runs/_eval_openset.py)，读数 [openset_eval.json](file:///d:/py/AURA/aura/runs/openset_eval.json) / `openset_eval.log`。
+**退化档版本**：`evaluate_openset_levels` / `format_openset_levels`（同样追加），脚本加 `--levels all`，读数 [openset_deg.json](file:///d:/py/AURA/aura/runs/openset_deg.json) / `openset_deg.log`（图库干净只编码一次，逐档只退化查询）。
+
+**口径**：test 的 200 条真实视频按 `identity` 切 **闭集 150 / 开集 50**；图库 = 闭集视频的 **1200 张干净真帧**；
+伪造查询按 `random.Random(0).sample` 全局确定性子采样 2000 张 → **闭集查询 1496 / 开集查询 504**（子采样只压编码量，闭集:开集仍按 150:50 自然分布）；
+拒识打分 = 查询对全库的 **top-1 余弦**（闭集标 1 / 开集标 0），阈值在**开集分布**的目标 FPR 分位上标定。
+
+| 变体 | 闭集帧 T1 | 闭集帧 T5 | 闭集视频 T1 | 拒识 AUC | TPR@FPR=1% | 相似度 闭集 / 开集 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **I-best**（2048 维，训练） | 60.36% | 89.10% | 99.73% | **99.75%** | 98.73%（实际 FPR 1.19%） | 0.9891 / 0.7172 |
+| **r8_norm**（192 维，零训练） | 61.03% | 88.90% | 99.73% | **99.73%** | 98.86%（实际 FPR 1.19%） | 0.9842 / 0.7207 |
+
+**三条结论（含一条诚实警告）**：
+
+1. **协议可跑通、闭集块与标准协议同量级**：闭集帧 T1 60.4~61.0%、视频 T1 99.73%（图库缩到 1200、查询子采样，故 Top-1 略高于全量协议的 59.68%，属预期）；开集块帧级/视频级 Top-K **恒为 0.00%**，符合"源头不在库"的构造。
+2. **训练模型在拒识上仍没有超过零训练 192 维描述子**（AUC 99.75 vs 99.73、TPR 98.73 vs 98.86，差在噪声级）—— 与 §3.6 帧级硬线结论一致：**自建模型至今在任何维度上都没能越过零训练参照**。
+3. **干净档下开集拒识近乎平凡**：开集查询的源视频在库中**整条缺席**，其 top-1 相似度（~0.72）天然远低于闭集（~0.99），所以 AUC ≈ 99.7% 是**易任务**，两个方法都轻松达标、**无区分度**。→ **已在退化档下重测（见下）**。
+
+**退化档重测（承接 §6-14，2026-10-20 已完成）**：图库仍干净只编码一次，逐档对闭集/开集查询同时退化（光度六档 + 几何六档 = 12 档）。
+
+| 档位 | I-best 闭集帧T1 | I-best AUC / TPR@1% | r8 闭集帧T1 | r8 AUC / TPR@1% |
+| --- | --- | --- | --- | --- |
+| clean | 60.36% | 99.75 / 98.73 | 61.03% | 99.73 / 98.86 |
+| jpeg50 | 60.23% | 99.75 / 98.80 | 61.16% | 99.73 / 98.86 |
+| jpeg20 | 60.36% | 99.74 / 98.53 | 61.16% | 99.73 / 98.86 |
+| scale0.5 | 60.29% | 99.75 / 98.66 | 61.03% | 99.73 / 98.86 |
+| crop0.5 | **1.34%** | **55.84 / 6.15** | **0.47%** | **51.22 / 1.94** |
+| reencode | 60.29% | 99.75 / 98.60 | 61.03% | 99.73 / 98.86 |
+| crop0.8 | 23.86% | 87.41 / 55.88 | 20.59% | 82.02 / 18.85 |
+| crop0.7off | 8.82% | 67.04 / 7.55 | 4.48% | 61.53 / 14.10 |
+| zoom1.15 | 34.22% | 98.22 / 81.28 | 33.16% | 97.53 / 76.74 |
+| rot5 | 48.33% | 99.55 / 94.18 | 44.92% | 99.66 / 98.40 |
+| rot10 | 34.56% | 96.87 / 64.64 | 30.88% | 97.71 / 76.00 |
+| shift8 | 38.03% | 99.58 / 94.52 | 36.83% | 99.58 / 96.59 |
+
+**三条结论**：① **光度六档下拒识几乎不变**（AUC 恒在 99.7%），与检索侧"判别信号在低频、光度退化不动它"完全一致；② **几何档才是真正的评测点**：`crop0.5` 使 AUC 从 99.75 崩到 **55.84**（TPR 仅 6.15），`crop0.8` 87.41、`crop0.7off` 67.04 —— 退化把"库里有无归宿"的判定拉回有意义区间；③ 即便在退化档下，**训练模型（I-best）与零训练 r8 的拒识读数仍各有胜负**（`crop0.8`/`zoom1.15`/`red10` I-best 略优，`crop0.7off`/`rot5`/`shift8` r8 略优），量级相当 ⇒ **训练在拒识维度同样没有稳定增益**。
+
+> 意义：本条补齐了 §4.2 #10 协议里 HashVAE 明确缺失的一项；**退化档读数已给出**（原"改到退化档下重测"这一步已完成）。
 
 ***
 
@@ -272,7 +427,7 @@
 | 1 | t-SNE / UMAP / Isomap 提升可解释性 | 把码降维画图 | 包装，降级为可视化章节 | **未做** |
 | 2 | 向量库 + 连续低维坐标 + 测地/黎曼距离 | 不学 0/1 比特，学连续坐标 + ANN | 可做的子贡献 | **半做**：连续嵌入 + 余弦排序已用；ANN / 非欧度量未做 |
 | 3 | 因果表示学习 / 身份=干预不变坐标 | 因果框架 | 框架，非贡献 | **未做**；只有 `X_Y` 因子标签被用上（当成对比学习的类别） |
-| 4 | 攻击 → 哪些坐标移动 → 归因 | 攻击可归因嵌人 | 早期评为"最有价值" | **搁置**：连帧级源都还没找准（47.75% < 58.80%），无从谈坐标漂移 |
+| 4 | 攻击 → 哪些坐标移动 → 归因 | 攻击可归因嵌人 | 早期评为"最有价值" | **搁置**：连帧级源都还没找准（best 59.68% 仍未过现行硬线 60.05%），无从谈坐标漂移 |
 | 5 | 攻击无监督对抗训练（自监督学背景唯一性） | 对比学习 | 主线候选 | **已实现并成为主线**，但做成**监督**对比（用 X 当标签），非文档写的无监督 |
 | 6 | 单编码器单阶段 + 正则打散哈希 | VICReg / Barlow Twins 式正则替代两阶段 | 工程简化，降级为消融 | **已实现**：`SourceEncoder` + SupCon + VICReg 方差铰链；这就是 AURA 现在的架构 |
 
@@ -281,7 +436,7 @@
 | # | 提案 | 原结论 | **现状（10-17）** |
 | --- | --- | --- | --- |
 | 1 | **溯源图 / 近重复链接**（伪造图→源图聚成簇） | 主力（贡献上限最高） | **未做** |
-| 10 | **任务与评测协议定义**（Recall@K / mAP / open-set 拒识 / 视频级折叠） | 主力（地基） | **半做**：图库/查询/命中/帧级+视频级已冻结进 [eval.py](file:///d:/py/AURA/aura/eval.py)；**open-set 拒识、mAP@10、规模三档未做** |
+| 10 | **任务与评测协议定义**（Recall@K / mAP / open-set 拒识 / 视频级折叠） | 主力（地基） | **大半做**：图库/查询/命中/帧级+视频级已冻结进 [eval.py](file:///d:/py/AURA/aura/eval.py)；**open-set 拒识已补（§3.14）**；mAP@10、规模三档未做 |
 | 2 | **退化鲁棒基准**（六档退化曲线） | 主力 | **补做中**：训练侧早有随机退化，**评测侧六档**本轮补上（[data.py](file:///d:/py/AURA/aura/data.py) + [eval.py](file:///d:/py/AURA/aura/eval.py)） |
 | 4 | 多帧 / 视频级聚合 | backup | **半做**：数据层 8 帧/视频 + 指标层视频级折叠已有；方法层投票 / 查询融合未做 |
 | 9 | 度量学习调优（难负 / 重排 / query expansion） | backup（保底涨点） | **半做**：XBM 4096 跨批队列 = 难负的轻量版；重排 / query expansion 未做 |
@@ -299,19 +454,21 @@
 [Retrieval 文档 §0.3](file:///d:/py/AURA/docs/AURA_Retrieval方向备份提案与迭代计划.md) 判定"AURA 的增量只能在任务 / 协议 / 溯源层"，即 §4.2 的 **#10（协议）+ #1（溯源图）+ #2（退化基准）** 三条。现状：
 
 - **#2 退化基准**：原计划 P3；**本轮补做**，成本最低、且是 §4.2 对比表里 HashVAE 明确为"无"的东西。
-- **#10 协议**：六档退化协议补上后，剩下 **open-set 拒识**（把部分查询的源图从图库移除，报 AUC / TPR@FPR=1%）同样没做 —— 同样是 HashVAE 没有的。
+- **#10 协议**：六档退化协议补上后，剩下的 **open-set 拒识**（把部分查询的源图从图库移除，报 AUC / TPR@FPR=1%）**本轮已补上**（§3.14，脚本 [\_eval_openset.py](file:///d:/py/AURA/aura/runs/_eval_openset.py)、实现 [eval.py `evaluate_openset`](file:///d:/py/AURA/aura/eval.py)）—— 同样是 HashVAE 与两家免训练基线都没有的；剩 mAP@10 / 规模三档未做。
 - **#1 溯源图**：零进展，是贡献上限最高的一条，但依赖嵌入质量（§3.3 的 47.75% 说明嵌入还不够）。
 
 ***
 
 ## 5. 已知瓶颈（诚实版）
 
-1. **AURA 目前没有自己的杰出贡献。** 复现的是别人的任务 + 别人的框架；我们做的（掩膜换实现、修 NaN、修 OOM、对齐容量）都属复现保真度或工程，不构成方法贡献。**模型结构侧没有我们的发明。**
-2. **自建模型帧级 Top-1 至今没过零训练 tiny32 整图基线（58.80%）** —— 最好成绩仍是 A 轮的 **47.75%**（C/D 轮均未超过）；硬线未过。§3.4 证明"再拼低层"救不了，§3.8 给出结构性解释（目标与判据不对齐 + GAP 丢空间精度 + 增强训练了不变性）。
-3. **"背景 = 来源指纹"这条假设的直接证据是复现出来的**，而且被"完整码 > 背景码"这条反证削弱。
-4. **检测分支是死路**（信息缺失已被两次独立裁决），论文里"检索 + 检测"的"检测"半边我们拿不到。
-5. **训练预算严重不足**：300 类 / batch 4 / 800 步 × 6 轮 ⇒ 每轮只过 3200 张（22%），14400 张要 ~4.5 轮才见一遍。深度分支"不如 32×32 缩略图"很可能有一部分是欠训练，不全是方法问题。
-6. **两条线之间仍有未解的矛盾**：§3.2 的免训练碾压（仍成立）vs §3.5 的口径勘误（推翻了"达不到他们 99%"的前提）。"该不该继续造模型"目前靠用户判断，不靠判据。
+1. **AURA 目前没有自己的杰出贡献。** 复现的是别人的任务 + 别人的框架；我们做的（掩膜换实现、修 NaN、修 OOM、对齐容量、去 GAP 头）都属复现保真度或工程，不构成方法贡献。**模型结构侧没有我们的发明。**
+2. **现行硬线（60.05%）从未被越过**：最好成绩是 I 轮 **e1 59.68%**（去 GAP），H 轮 e1 58.45%；且 H/I 都是 **e1 最高、之后单调回落**（I：59.68 → 58.71 → 57.86），末轮更低。**"best-epoch 还是末轮"的口径未定，这本身是待决问题（§6-7）。** 零训练的 r8_norm（8×8 逐图标准化缩略图，192 维，clean 60.05%）仍高于我们的 best —— 现行硬线正是 60.05%。
+3. **回落成因未完全闭合**：J 轮冻结 backbone 后仍回落 ⇒ 不是 backbone 被侵蚀，而是 head 读法漂移；诱因指向 XBM 队列灌满后的负样本陡增，但未做单变量确认。
+4. **方案 B 的残差全在初筛召回**（§3.11）：可微几何重排本体已与经典 SIFT+RANSAC 持平（cond@1 63~70% vs 62~72%），差距来自 `crop0.7off` 的 recall@300 仅 91.33%；shift8（−6.3pp）与 clean（−3.7pp）是仅有的两处明显缺口。**σ/temp 已网格扫描（§3.12），最优仍 66.52/66.90 < 经典 67.57 ⇒ 缺口不是参数没调好**，来源是初筛召回与 shift8。
+5. **"背景 = 来源指纹"这条假设的直接证据是复现出来的**，而且被"完整码 > 背景码"这条反证削弱。
+6. **检测分支是死路**（信息缺失已被两次独立裁决），论文里"检索 + 检测"的"检测"半边我们拿不到。
+7. **训练预算严重不足**：300 类 / batch 4 / 800 步 × 6 轮 ⇒ 每轮只过 3200 张（22%），14400 张要 ~4.5 轮才见一遍。而"训得久反而掉"使这一条从"欠训练"变成了"**过训练即退化**"的两难。
+8. **两条线之间仍有未解的矛盾**：§3.2 的免训练碾压（仍成立）vs §3.5 的口径勘误（推翻了"达不到他们 99%"的前提）。"该不该继续造模型"目前靠用户判断，不靠判据。
 
 ***
 
@@ -323,13 +480,16 @@
 4. 溯源图 / 近重复链接相对 ViTHash 与近重复检测文献，是否真有空白？
 5. "图级源图检索"作为任务本身，是否足以支撑一篇论文？还是必须再挂一个方法贡献？（§3.5 之后，与 ViTHash 的差异点仍需正面对比）
 6. 数据侧只有 FF++ C23；是否需要 / 能否拿到更高质量素材（c0/raw 而非 C23）或跨数据集？
-7. **【最高优先，需用户拍板】帧级 Top-1 这条路怎么走**（§3.9）：数学上已证瓶颈是 **GAP 的空间压缩（65536:1 多对一满射）**，不是超参。五轮（47.75 / — / 46.91 / 46.44）+§3.4 零增益已穷尽验证。两条路二选一：
-   - **(a) 架构去 GAP**：head 改保留空间网格（8×8 池化 flatten + 线性，或 `GAP ⊕ 空间网格`）；结构级改动，需单独一轮，有显存风险。
-   - **(b) 重定位判据/叙事**：主报视频级 + 帧 Top-5 + 退化曲线，突出汉明≈余弦。
-8. **（建议先做，成本极低、无需 GPU）测出该协议的内在上限**：用一个"掩掉人脸、只用背景"的零训练匹配器（64×64）复算帧级 Top-1。若上限也 ≈59%，则 58.80% 是**协议饱和值**，追它无意义、直接走 (b)；若上限显著更高（如 80%），则 (a) 有真实空间。这个测量能**在花掉一轮训练前**决定方向。
-9. **是否该继续把帧级 Top-1 当第一判据**：58.80% 由**像素模板匹配**取得，它天然吃掉"查询与答案背景逐像素相同"这个协议红利。可选口径：把帧级降为次要指标；或改判"在命中正确视频的前提下，帧号是否选对"（当前 47% vs 同视频内随机 1/8 = 12.5%）。**改口径 = 移动门线，必须先与用户确认。**
-10. **独立增强与判据冲突**（§3.9 第 4 条）：对正样本对施加**同一个**随机变换（pair-wise 一致增强）可在保住相对低层线索的同时保留"防抄近路"的作用 —— 待 (a)/(b) 定后单测。
+7. **【需用户拍板】帧级 Top-1 这条路怎么走**（§3.9 → §3.10）：**(a) 架构去 GAP 已在 H/I 两轮执行，结论是有效（+12pp，best 59.68%）**。剩下的分歧变成两条：
+   - **(a′)** 继续在空间头上打"回落"这一仗（best-epoch 已达线，但末轮不过线）；
+   - **(b)** 重定位判据/叙事：主报视频级 + 帧 Top-5 + 退化曲线，突出汉明≈余弦；或用**方案 B 的两阶段重排器**（§3.11）作为检索侧主叙事。
+8. **测该协议的内在上限**（原建议"掩掉人脸、只用背景的零训练 64×64 匹配器"）**已被更廉价的版本部分回答**：零训练手工描述子扫描（[probe_protocol_ceiling.json](file:///d:/py/AURA/aura/runs/probe_protocol_ceiling.json)）给出 clean 档上限 ≥ r8_norm 的 60.05%（分辨率甜点 8px），即 **58.80% 不是协议饱和值，但 60% 附近很可能是**。完整版（掩人脸）未做。
+9. **是否该继续把帧级 Top-1 当第一判据**：现行硬线 **60.05%（r8_norm）**由**像素模板匹配**取得，它天然吃掉"查询与答案背景逐像素相同"这个协议红利。可选口径：把帧级降为次要指标；或改判"在命中正确视频的前提下，帧号是否选对"（当前 ~59% vs 同视频内随机 1/8 = 12.5%）。**改口径 = 移动门线，必须先与用户确认。**
+10. **独立增强与判据冲突**（§3.9 第 4 条、F 轮实测）。**pair-wise 一致增强**（对正样本对施加同一个随机变换）尚未单测。
 11. **`crop0.5` 档位口径失真**（§3.8）：FF++ 人脸居中，"中心裁剪 50%"直接删掉背景 ⇒ 0.27%。应改成**随机偏移裁剪**（保留部分背景）再测。
+12. **如何消除 H/I 的"e1 后回落"**：候选手段 = XBM 队列容量/灌满策略、恒定 lr、EMA/权重平均、early-stopping、或把空间头也冻结（J 轮只冻结 backbone，仍掉）。**未做单变量确认**。
+13. **方案 B（全可微几何重排）是否足以当卖点**：它已经是"没有 SIFT/RANSAC、端到端可微"的检索期打分器，与经典只差 −1.1pp 且 4/7 档反超。sigma/temp 网格扫描（§3.12）已**证伪"调参反超"**；**用户已拍板（2026-10-20，保守方案）**：走**路线 B（benchmark / 分析论文框架）**，重排器定位为**"持平经典的等价替代"（工程贡献）**，与任务 / 协议 / 溯源层组合成章，不再追绝对数值反超。
+14. **open-set 拒识要在退化档下重测**（§3.14）：干净档下 AUC ≈ 99.7% 近乎平凡、两法无区分度；应在几何七档 / 光度六档下重跑（闭集查询相似度被退化压低后，库内 vs 库外的可分性才见真章），并补"拒识后检索"的联合指标。**退化档已重测（§3.14 退化档表，12 档全跑）；"拒识后检索"联合指标未做。**
 
 **外部先例**：**ViTHash**（arXiv 2112.08117）已把"从伪造视频找回原始视频"做成任务。差异点：它整帧、视频级、无前后景分离、无退化协议、无溯源图。
 
@@ -340,27 +500,53 @@
 | 项 | 位置 |
 | --- | --- |
 | 基线代码（复现的 HashVAE，**已冻结**） | `d:\py\AURA\baseline\`（`models/` `data/` `losses/` `eval/` `analysis/`） |
-| 自建模型 | `d:\py\AURA\aura\`（`encoder.py` `data.py` `losses.py` `eval.py` `train.py` `configs/`） |
-| 自建权重 | `aura_full_e{1..6}.pth`（A）、`aura_full_sid_e{1..6}.pth`（B，作废）、`aura_full_erase_e{1,2}.pth`（C，崩盘已弃）、`aura_full_erase_lite_e{1..6}.pth`（D）、`aura_full_fine_e{1..6}.pth`（E）。均在 `D:/py/AURA/aura/runs/` |
-| 训练日志 | `train_full.log`（A）、`train_full_sid.log`（B）、`train_full_erase.log`（C，中断）、`train_full_erase_lite.log`（D）、`train_full_fine.log`（E） |
-| 评估产物 | `aura_full{,_sid,_erase_lite,_fine}_history.json`（逐轮）、`aura_full_{erase_lite,fine}_degradation.json`（六档退化） |
+| 自建模型 | `d:\py\AURA\aura\`（`encoder.py` `data.py` `losses.py` `geo.py` `eval.py` `train.py` `configs/`） |
+| 自建权重（A–E） | `aura_full_e{1..6}.pth`（A）、`aura_full_sid_e{1..6}.pth`（B，作废）、`aura_full_erase_e{1,2}.pth`（C，崩盘已弃）、`aura_full_erase_lite_e{1..6}.pth`（D）、`aura_full_fine_e{1..6}.pth`（E） |
+| 自建权重（F–K2） | `aura_full_geo_e{1..6}.pth`（F）、`aura_full_distill_e{1..6}.pth`（G）、`aura_full_spatial_e{1..3}.pth`（H）、`aura_full_spatial_i_e{1..4}.pth` + **`aura_full_spatial_i_best.pth`（I-best，59.68%）**、`aura_full_spatial_j_e1/best.pth`（J）、`aura_full_geo_k_e1/best/preheat.pth`（K + 预热）、`aura_full_geo_k2_e1/best.pth`（K2）。均在 `D:/py/AURA/aura/runs/` |
+| 独立局部描述子权重 | `local_desc.pth`（自监督稠密 InfoNCE 训练，方案 B 的最佳特征源） |
+| 训练日志 | `train_full*.log`（A/B/C/D/E/F/G/H/I/J/K）、`train_geo_k2.log`（K2）、`preheat.log`（local_head 预热）、`eval_geom_*.log`（逐档评估） |
+| 评估产物 | 逐轮 `aura_full*_history.json`；七档几何 `geom_model_{spatial_i_best,geo_k}.json`；退化六档 `aura_full_{erase_lite,fine}_degradation.json` |
+| 方案 B 产物 | **`two_stage_geo_local.json` / `.log`（独立描述子，均值 66.52%）**、`two_stage_geo_local_head.json` / `.log`；经典对照 `geom_invariant_final.json`；原型 `diff_geom_local_full.json`；局部头体检 `local_head_preheat.json` |
+| 探索 1 产物（σ/temp 扫描） | `_scan_geo_params.py`（脚本）、**`scan_geo_params_local.json`**（230KB，含 16 个 combo × 7 档逐项明细 + `summary`）、`scan_geo_params.json`（早期冒烟） |
+| 探索 2 产物（几何目标训局部描述子，**已否定**） | `_train_local_desc_geo.py`（脚本，保留）；临时权重 `local_desc_geo.pth` / json / log **已删除** |
+| open-set 产物 | `_eval_openset.py`（脚本）、**`openset_eval.json`** / `openset_eval.log`（I-best 与零训练 r8 两参照的闭集 Top-K + 拒识 AUC / TPR@FPR）；实现见 [eval.py](file:///d:/py/AURA/aura/eval.py) `evaluate_openset` / `format_openset` / `_auc_rank` |
+| 一次性脚本（唯一入库的 `.py`） | `_eval_two_stage_geo.py`（方案 B 两阶段重排）、`_eval_geom_model.py`、`_probe_geom_invariant.py`（经典 SIFT+RANSAC 对照）、`_probe_diff_geom.py`、`_preheat_local_head.py`、`_train_local_desc.py`、`_joint_query_oracle.py`、`_probe_protocol_ceiling.py`、`_verify_shortcut.py`、`_scan_geo_params.py`（探索 1）、`_train_local_desc_geo.py`（探索 2）、`_eval_openset.py`（open-set 协议） |
 | 模型结构图（mermaid，随代码同步维护） | [AURA_模型结构图.md](file:///d:/py/AURA/docs/AURA_模型结构图.md) |
 | TensorBoard | `aura/runs/tb/` |
 | BiSeNet 人脸掩膜缓存 | `baseline/cache/masks/`（49288 张 128×128 `.npy`，C 轮擦除直接复用） |
 | 数据 | `D:/ffpp_frames`（FF++ C23 抽帧，manifest.csv） |
 | 环境 | Python `E:\conda\envs\pytorch\python.exe`；GPU：RTX 2080Ti 22GB（`CUDA_VISIBLE_DEVICES=1`）；`num_workers=0` |
-| 运行 | `python -m aura.train --config aura/configs/aura_full.yaml`（项目根目录 `d:\py\AURA` 下，需 `PYTHONPATH=d:\py\AURA`） |
+| 运行 | `python -u -m aura.train --config aura/configs/aura_full_geo_k.yaml`（项目根目录 `d:\py\AURA` 下，需 `PYTHONPATH=d:\py\AURA`） |
 
 ***
 
-## 8. 本轮（C / D 轮 + 文档）改动清单
+## 8. 改动清单
+
+### 8.1 本轮（F–K2 轮 + 方案 B）
 
 | 文件 | 改动 |
 | --- | --- |
-| [data.py](file:///d:/py/AURA/aura/data.py) | 新增 `load_face_mask` / `erase_face` / `apply_degradation` / `DEGRADATION_LEVELS`；`degrade()` 加 `mask` 参数并同步翻转；`ContrastiveDataset` 加 `erase_prob` / `mask_cache_dir` / `degrade_level` / **`label_key`（可配置 identity ↔ source_id）**；注释记下"掩膜近似二值、阈值无效"实测 |
-| [encoder.py](file:///d:/py/AURA/aura/encoder.py) | 新增 `use_multiscale_skip`：每尺度降采样前的可学 lateral，拼接进 head（**始终关闭**，未单测；且已发现其 `AdaptiveAvgPool2d(1)` 不含空间相位，见 §3.9 第 3 条） |
-| [eval.py](file:///d:/py/AURA/aura/eval.py) | 新增 `evaluate_degradation` / `format_degradation`：图库保持干净且只编码一次、查询按六档退化，报退化鲁棒曲线 |
-| [configs/aura_full.yaml](file:///d:/py/AURA/aura/configs/aura_full.yaml) | **E 轮**：`name: aura_full_fine`、`label_key: 'source_id'`、`lr: 5e-5`、`warmup_ratio: 0.2`、`erase_prob: 0.0`；另含 D 轮的 `mask_cache_dir` / `use_multiscale_skip: false` / `degradation_eval: 'last'` |
-| [train.py](file:///d:/py/AURA/aura/train.py) | 训练集透传 `erase_prob` / `label_key`；最后一轮额外跑退化曲线并落 `*_degradation.json` |
-| [docs/AURA_模型结构图.md](file:///d:/py/AURA/docs/AURA_模型结构图.md) | **新建**：6 张 mermaid 图（含逐级张量尺寸）+ 规格表 + 同步记录，随结构改动维护 |
-| [docs/AURA_HANDOFF.md](file:///d:/py/AURA/docs/AURA_HANDOFF.md) | §3.3 加 C/D/E 轮读数与结论（B 轮作废）；§3.6 加 kill 判据合法性复核；§3.7 记 C 轮结局；新增 §3.8 退化读数 + 结构性诊断、**§3.9 GAP 瓶颈的数学论证**；§5/§6/§7 同步 |
+| [encoder.py](file:///d:/py/AURA/aura/encoder.py) | 新增 `spatial_head` / `pool_grid`（**去 GAP**：`Conv1×1(512→32) → AdaptiveAvgPool2d(8×8) → Flatten` = 2048，保留空间网格）；新增 `local_head`（挂在共享 `conv0→scales[0]` 的逐位置描述子头，3 层 stride2 → 32×32 网格）与 `forward_local`；新增独立 `LocalDescriptor(dim=32,width=32,depth=3)`（方案 B 的最佳特征源） |
+| [data.py](file:///d:/py/AURA/aura/data.py) | 新增 `GEOM_LEVELS`（几何七档）、`random_geom_degradation`、`_geom_aug`（旋转/缩放/平移，含掩膜同步）、`GeoPairDataset`（K 轮几何监督对：退化伪造查询 ↔ 同源干净真帧） |
+| [geo.py](file:///d:/py/AURA/aura/geo.py) | **新建**：可微几何验证模块 —— `grid_coords` / `soft_mutual_match`（软互最近邻，softmax 替代硬 argmax） / `diff_dlt`（加权可微 DLT，`torch.linalg.lstsq`） / `geom_score`（软内点占比） / `pair_score` / `geo_consistency_loss`。**全链无 SIFT / RANSAC** |
+| [train.py](file:///d:/py/AURA/aura/train.py) | `KILL_LINES` **上移到 60.05% / 60.62%**（2026-10-18）；新增 `geo_loader`（GeoPairDataset）、`freeze_backbone`（冻结段强制 eval）、`distill`（`lowres_teacher` + 投影头）、几何一致性损失入联合优化（梯度经共享主干回传）；训练集透传 `geom_aug` |
+| [configs/](file:///d:/py/AURA/aura/configs) | 新增逐轮配置：`aura_full_geo.yaml`（F）、`aura_full_distill.yaml`（G）、`aura_full_spatial.yaml`（H）、`aura_full_spatial_i.yaml`（I）、`aura_full_spatial_j.yaml`（J）、`aura_full_geo_k.yaml`（K） |
+| `aura/runs/`（一次性脚本） | `_eval_two_stage_geo.py`（**方案 B 两阶段重排**）、`_eval_geom_model.py`（几何七档逐档评估）、`_probe_geom_invariant.py`（经典 SIFT+RANSAC 对照）、`_probe_diff_geom.py`（可微几何原型）、`_preheat_local_head.py`、`_train_local_desc.py`（独立局部描述子）、`_joint_query_oracle.py`、`_probe_protocol_ceiling.py`（零训练手工描述子扫描） |
+| [README.md](file:///d:/py/AURA/README.md) | 标题/开头改"两阶段两条线"；§1 目录结构更新 `aura/` 实际内容；新增 **§4.1 自建线用法**、**§6 现状与关键读数**（协议 / A–K2 各轮表 / 方案 B 对照表）；§5 界定提醒改 2026-10-20 版；kill 硬线同步 60.05% |
+| [docs/AURA_模型结构图.md](file:///d:/py/AURA/docs/AURA_模型结构图.md) | §2 拆成「主干→池化段（GAP/空间两模式）→全局头」+「局部描述子支路 `forward_local`」；新增 §7「方案 B 两阶段检索器」；§5 损失补蒸馏/几何；§6 拆出几何七档；§8 规格表与 §9 同步记录加 F–K2 各行 |
+| [docs/AURA_Retrieval方向备份提案与迭代计划.md](file:///d:/py/AURA/docs/AURA_Retrieval方向备份提案与迭代计划.md) | 两处过时断言（§0「`aura/` 只有一个占位 `__init__.py`」、§6 P0「不动 AURA、保持占位」）加 **2026-10-20 dated note** 指向本文；界定结论（增量只在任务/协议/溯源层）保持有效 |
+| [docs/AURA_研究方向评估与实现方案.md](file:///d:/py/AURA/docs/AURA_研究方向评估与实现方案.md) | 头部加 **pre-AURA 状态注记**（v2 2026-10-15 = 早期 128px 基线评估，现状见本文） |
+| [docs/AURA_HANDOFF.md](file:///d:/py/AURA/docs/AURA_HANDOFF.md) | 本文：头部日期/阶段、§2 现状重写、§3.6 kill 判据上移、§3.9 尾注、新增 §3.10（F–K2 轮）/ §3.11（方案 B）、§5 已知瓶颈重写、§6 待决问题补 12/13 条、§7 资产表重写、本 §8 |
+
+### 8.2 本轮（路线 B 起步：探索 1/2 + open-set 协议 + 退化档 open-set + 论文开篇）
+
+| 文件 | 改动 |
+| --- | --- |
+| [eval.py](file:///d:/py/AURA/aura/eval.py) | **追加**（不改现有函数）`evaluate_openset`（开集拒识：图库/查询按视频切闭集/开集；闭集报 Top-K，拒识报 top-1 余弦的 AUC 与 TPR@FPR）、`format_openset`、`_auc_rank`（Mann-Whitney 平均秩 AUC，无第三方依赖）；**本轮再追加** `evaluate_openset_levels` / `format_openset_levels`（开集拒识 × 12 档退化，图库干净只编码一次） |
+| `aura/runs/_scan_geo_params.py` | **新建**（探索 1）：几何模块 sigma×temp 网格扫描；temp 外层算一次、sigma 内层只重算 `geom_score`；结果 `scan_geo_params_local.json` |
+| `aura/runs/_train_local_desc_geo.py` | **新建**（探索 2）：用几何目标训独立 `LocalDescriptor`（hinge / rank 两种损失，可从 InfoNCE 权重或随机初始化）；**结论为双重否定**，临时权重已删，脚本入库留档 |
+| `aura/runs/_eval_openset.py` | **新建**：开集拒识评估脚本；按 identity 切 150/50 视频，跑 I-best（`aura_full_spatial_i_best.pth`）与零训练 `r8_norm` 两参照，输出 `openset_eval.json` / `.log`；**本轮扩 `--levels` 退化模式**，输出 `openset_deg.json` / `.log`（12 档） |
+| [README.md](file:///d:/py/AURA/README.md) | §6 补 **§6.4 参数敏感性**、**§6.5 open-set 拒识**（含退化档读数）；§6.3 末「未验证的调参假设」改为已证伪；开头与 §6 补路线 B 定位；§1 目录结构补 `paper/` |
+| [docs/AURA_HANDOFF.md](file:///d:/py/AURA/docs/AURA_HANDOFF.md) | 本文：头部阶段改"转路线 B"、§2 补路线 B 定位、§3.11 调参假设改为已证伪、新增 **§3.12（探索 1）/ §3.13（探索 2）/ §3.14（open-set，含退化档重测）**、§4.2 #10 与 §4.3 同步、§5-4 / §6-13/14 同步、§7 资产表补产物、本 §8.2 |
+| `paper/`（**新建**） | LaTeX 论文源码目录：`main.tex` / `preamble.tex` / `refs.bib` / `sections/`（摘要 + §1 引言 + §2 相关工作 + §3 任务与协议 + §4 方法 + §5 实验 + §6 讨论与结论）/ `figures/` / `build/`（编译产物）/ `build.ps1`（xelatex+bibtex 编译脚本，无 perl 依赖）。当前为**中文初稿**，已编译出 11 页 PDF（`paper/build/main.pdf`） |
+

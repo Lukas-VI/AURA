@@ -52,8 +52,11 @@ def main():
     print(f"device={dev} | config={args.config} | ckpt={args.ckpt}", flush=True)
 
     model = SourceEncoder.build_from_config(cfg).to(dev)
-    model.load_state_dict(torch.load(args.ckpt, map_location=dev))
+    # strict=False：K 轮权重带局部描述子头（local_head.*），旧轮次权重没有 —— 两边都能载。
+    missing, unexpected = model.load_state_dict(torch.load(args.ckpt, map_location=dev), strict=False)
     model.eval()
+    if missing or unexpected:
+        print(f"[load] strict=False | 缺键 {len(missing)} / 多余键 {len(unexpected)}", flush=True)
     print(f"参数 {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M", flush=True)
 
     index = build_ffpp_index(cfg)

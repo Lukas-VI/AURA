@@ -34,10 +34,11 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from aura.data import ContrastiveDataset, GroupBatchSampler
+from aura.data import ContrastiveDataset, GeoPairDataset, GroupBatchSampler
 from aura.encoder import SourceEncoder
 from aura.eval import evaluate, evaluate_degradation, format_degradation, format_report
-from aura.losses import supcon_loss, variance_loss
+from aura.geo import geo_consistency_loss, grid_coords, pair_score
+from aura.losses import grid_supcon_loss, supcon_loss, variance_loss
 from baseline.data.dataset import build_ffpp_index
 from baseline.utils import ensure_dir, get_device, load_config, set_seed
 
@@ -74,7 +75,9 @@ def _build_loaders(index, cfg, seed):
                                 groups_per_batch=int(cfg["groups_per_batch"]),
                                 samples_per_group=int(cfg["samples_per_group"]),
                                 steps_per_epoch=int(cfg["steps_per_epoch"]),
-                                seed=seed)
+                                seed=seed,
+                                video_keys=[s["source_id"] for s in train_ds.samples],
+                                hard_neg_pair=bool(cfg.get("hard_neg_pair", False)))
     train_loader = DataLoader(train_ds, batch_sampler=sampler,
                               num_workers=int(cfg.get("num_workers", 0)))
 
@@ -89,12 +92,26 @@ def _build_loaders(index, cfg, seed):
                            batch_size=eval_bs, shuffle=False, num_workers=0)
     query_loader = DataLoader(ContrastiveDataset(fake, image_size=size, train=False, seed=seed),
                               batch_size=eval_bs, shuffle=False, num_workers=0)
-    return train_ds, sampler, train_loader, val_ds, db_loader, query_loader
+
+    # K 轮：可微几何验证模块的训练对（退化伪造查询 ↔ 同源干净真帧）。与检索批分开采样：
+    # 检索批保持 I 轮原样（不变量），几何支路只增不改，便于把 T1 变化归因到几何监督。
+    geo_loader = None
+    if bool(cfg.get("geo", False)):
+        geo_size = int(cfg.get("geo_size", size))
+        geo_ds = GeoPairDataset([s for s in index["train"] if s["kind"] == "fake"],
+                                image_size=geo_size, seed=seed,
+                                max_deg=float(cfg.get("geo_max_deg", 12.0)),
+                                smin=float(cfg.get("geo_smin", 0.7)), smax=float(cfg.get("geo_smax", 1.3)),
+                                max_shift=float(cfg.get("geo_max_shift", 0.08)),
+                                cmin=float(cfg.get("geo_cmin", 0.7)))
+        geo_loader = DataLoader(geo_ds, batch_size=int(cfg.get("geo_batch", 4)),
+                                shuffle=True, num_workers=0, drop_last=True)
+    return train_ds, sampler, train_loader, val_ds, db_loader, query_loader, geo_loader
 
 
 def train_one_epoch(model, sampler, train_loader, optimizer, scheduler, cfg, device,
-                    epoch, queue_z, queue_labels, proj=None, writer=None):
-    """单阶段对比学习：SupCon（+跨批内存） + 方差铰链（+可选低层蒸馏）。fp32 前向 + 梯度裁剪 + 坏批丢弃。"""
+                    epoch, queue_z, queue_labels, proj=None, writer=None, geo_loader=None):
+    """单阶段对比学习：SupCon（+跨批内存） + 方差铰链（+可选低层蒸馏/可微几何一致性）。"""
     model.train()
     if bool(cfg.get("freeze_backbone", False)):     # 冻结部分强制 eval：BN 走 running stats，既不回传也不漂移
         for name, m in model.named_children():
@@ -106,6 +123,26 @@ def train_one_epoch(model, sampler, train_loader, optimizer, scheduler, cfg, dev
     log_interval = int(cfg.get("log_interval", 20))
     total_steps = len(train_loader)
 
+    # ---- K 轮：可微几何验证模块的损失超参 ----
+    geo_iter = iter(geo_loader) if geo_loader is not None else None
+    g_temp = float(cfg.get("geo_temp", 0.05))
+    g_sigma = float(cfg.get("geo_sigma", 0.08))
+    g_margin = float(cfg.get("geo_margin", 0.3))
+    lam_geo = float(cfg.get("lambda_geo", 1.0))
+    geo_acc, geo_sp, geo_sn, geo_n = 0.0, 0.0, 0.0, 0
+
+    # ---- 网格级对比（§6.2 第 2 条）----
+    # 只在 spatial_head 模式下可用：此时 head 之前的池化向量就是 grid_ch × G × G 的展平结果，
+    # 可按位置拆成 G² 个局部描述子（默认 8×8×32）。
+    grid_on = bool(cfg.get("grid_contrast", False))
+    g_grid = int(cfg.get("pool_grid", 8))
+    grid_ch = int(cfg["embed_dim"]) // (g_grid * g_grid)
+    lam_grid = float(cfg.get("lambda_grid", 0.5))
+    tau_grid = float(cfg.get("tau_grid", 0.1))
+    grid_acc, grid_n = 0.0, 0
+    if grid_on:
+        assert bool(cfg.get("spatial_head", False)), "grid_contrast 需要 spatial_head=true"
+
     acc, n, nonfinite = 0.0, 0, 0
     t_last = time.time()
     for step, batch in enumerate(train_loader, 1):
@@ -114,7 +151,10 @@ def train_one_epoch(model, sampler, train_loader, optimizer, scheduler, cfg, dev
 
         # 编码器内部整段强制 fp32（见 encoder.py 的 forward 注释）：AMP 在这条主干上会在个别批
         # 溢出成 NaN。对比损失本来就在 fp32 里算，这里不再套外层 autocast，保持数值一致。
-        z_raw = model(img)
+        if grid_on:
+            z_raw, pooled = model(img, return_pooled=True)
+        else:
+            z_raw = model(img)
         z = F.normalize(z_raw.float(), dim=1)                   # 对比损失在 fp32 上算
 
         has_q = queue_z is not None and queue_z.numel() > 0
@@ -126,6 +166,19 @@ def train_one_epoch(model, sampler, train_loader, optimizer, scheduler, cfg, dev
         loss_v = variance_loss(z)
         loss = loss_c + float(cfg.get("lambda_vicreg", 0.05)) * loss_v
 
+        # 网格级对比：把 head 之前的 8×8 网格按位置拆开，逐位置做跨样本 SupCon。
+        # 展平顺序是 (通道, 高, 宽)，因此必须先 reshape 成 (B, C, G, G) 再换到位置维，
+        # 直接 reshape(B, G², C) 会得到错误的"位置"。
+        loss_grid = None
+        if grid_on:
+            b = pooled.shape[0]
+            cells = pooled.reshape(b, grid_ch, g_grid, g_grid).permute(0, 2, 3, 1)
+            cells = F.normalize(cells.reshape(b, g_grid * g_grid, grid_ch).float(), dim=2)
+            loss_grid = grid_supcon_loss(cells, labels, tau=tau_grid)
+            loss = loss + lam_grid * loss_grid
+            grid_acc += float(loss_grid) * b
+            grid_n += b
+
         # 低层蒸馏（路线 A）：把 r8_norm 教师的判别结构压进主干。投影头只作用于主嵌入，
         # 检索路径不经过它 —— 学生仍有自由度超过教师（否则上限被人为压在 60.05%）。
         loss_d = None
@@ -134,6 +187,36 @@ def train_one_epoch(model, sampler, train_loader, optimizer, scheduler, cfg, dev
             p = F.normalize(proj(z), dim=1)
             loss_d = (1.0 - (p * t).sum(dim=1)).mean()
             loss = loss + float(cfg.get("lambda_distill", 0.5)) * loss_d
+
+        # 可微几何一致性（K 轮）：同一优化步内联合优化，梯度经【共享主干 conv0/scales[0]】回传，
+        # 让"背景可被同一单应解释"直接塑形检索表征（不是外挂重排器，推理路径根本不走这条）。
+        loss_g = None
+        if geo_iter is not None:
+            try:
+                gb = next(geo_iter)
+            except StopIteration:
+                geo_iter = iter(geo_loader)
+                gb = next(geo_iter)
+            Fq = model.forward_local(gb["query"].to(device))     # (B,D,g,g) 逐位置 L2 归一化
+            Fr = model.forward_local(gb["ref"].to(device))
+            bq, d, g, _ = Fq.shape
+            Fq = Fq.reshape(bq, d, g * g)                        # (B,D,N)
+            Fr = Fr.reshape(bq, d, g * g)
+            coords = grid_coords(g, Fq.device)
+            s_pos = pair_score(Fq, Fr, coords, g_temp, g_sigma)  # 同源：干净真帧
+            # 负对：参考逐个错位 -> 每个查询配到【同一批内其他所有源】的干净真帧（零额外前向）。
+            # 只用单个错位时每个查询仅 1 个负样本，信号太薄；跑遍全部错位把负样本数提到 B×(B-1)。
+            if bq < 2:
+                s_neg = 1.0 - s_pos                              # 单样本批：无负样本可用，退化为 0 损失
+            else:
+                s_neg = torch.stack([pair_score(Fq, torch.roll(Fr, shifts=s, dims=0), coords,
+                                                g_temp, g_sigma) for s in range(1, bq)]).mean(0)
+            loss_g = geo_consistency_loss(s_pos, s_neg, g_margin)
+            loss = loss + lam_geo * loss_g
+            geo_acc += float(loss_g) * bq
+            geo_sp += float(s_pos.mean()) * bq
+            geo_sn += float(s_neg.mean()) * bq
+            geo_n += bq
 
         # 坏批保护：整批丢弃，既不 backward 也不碰 GradScaler（否则 NaN 梯度会把 scale 拖到 0，
         # 训练静默空转 —— baseline 256px 全规格踩过这个坑）
@@ -177,10 +260,18 @@ def train_one_epoch(model, sampler, train_loader, optimizer, scheduler, cfg, dev
             print(f"  [e{epoch} {step:>5}/{total_steps}] loss={loss.item():.4f} "
                   f"con={loss_c.item():.4f} var={loss_v.item():.4f} "
                   f"dis={(loss_d.item() if loss_d is not None else 0.0):.4f} "
+                  f"geo={(loss_g.item() if loss_g is not None else 0.0):.4f} "
+                  f"grid={(loss_grid.item() if loss_grid is not None else 0.0):.4f} "
                   f"| emb_std={std:.4f} q={0 if queue_z is None else queue_z.shape[0]} "
                   f"| lr={optimizer.param_groups[0]['lr']:.2e} nf={nonfinite} "
                   f"| {ms:.0f}ms/step eta={(total_steps - step) * ms / 60000:.1f}min", flush=True)
     print(f"  [epoch {epoch}] avg loss={acc / max(n, 1):.4f} | 样本 {n} | nf={nonfinite}")
+    if geo_n:
+        print(f"  [epoch {epoch} geo] 几何一致性 loss={geo_acc / geo_n:.4f} | "
+              f"正对分数={geo_sp / geo_n:.3f} 负对分数={geo_sn / geo_n:.3f}（分离度 "
+              f"{(geo_sp - geo_sn) / geo_n:.3f}）| 几何对 {geo_n}")
+    if grid_n:
+        print(f"  [epoch {epoch} grid] 网格级对比 loss={grid_acc / grid_n:.4f} | 样本 {grid_n}")
     if writer:
         writer.add_scalar("train/loss", acc / max(n, 1), epoch)
     return queue_z, queue_labels
@@ -220,12 +311,16 @@ def main():
     print(f"device = {device} ({gpu}) | torch = {torch.__version__}")
 
     index = build_ffpp_index(cfg)
-    train_ds, sampler, train_loader, val_ds, db_loader, query_loader = _build_loaders(
+    train_ds, sampler, train_loader, val_ds, db_loader, query_loader, geo_loader = _build_loaders(
         index, cfg, int(cfg.get("seed", 42)))
     print(f"训练样本 {len(train_ds)} 张 / {sampler.n_groups} 个源 | "
           f"batch = {cfg['groups_per_batch']}源 × {cfg['samples_per_group']} = "
           f"{int(cfg['groups_per_batch']) * int(cfg['samples_per_group'])} | "
           f"step/epoch = {len(train_loader)} | 评估图库 {len(db_loader.dataset)} / 查询 {len(query_loader.dataset)}")
+    if geo_loader is not None:
+        print(f"[geo] 几何验证训练对 {len(geo_loader.dataset)} 个（训练集伪造帧）/ batch {cfg.get('geo_batch', 4)} "
+              f"/ size {cfg.get('geo_size', cfg['image_size'])} | λ_geo={cfg.get('lambda_geo', 1.0)} "
+              f"| temp={cfg.get('geo_temp', 0.05)} σ={cfg.get('geo_sigma', 0.08)}")
 
     model = SourceEncoder.build_from_config(cfg).to(device)
     n_param = sum(p.numel() for p in model.parameters())
@@ -236,8 +331,11 @@ def main():
     # 掐断 backbone 的梯度回传后，只让 head 学"如何把冻结的空间特征读成判别嵌入"，就不会再破坏它。
     if cfg.get("init_ckpt"):
         init_path = os.path.abspath(str(cfg["init_ckpt"]))
-        model.load_state_dict(torch.load(init_path, map_location=device))
-        print(f"[init] 从 {init_path} 载入权重")
+        # strict=False：K 轮在 I-best 之上新增了局部描述子头（local_head.*），旧权重里没有这些键，
+        # 新键随机初始化即可（骨干完全加载）。
+        state = torch.load(init_path, map_location=device)
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        print(f"[init] 从 {init_path} 载入权重（strict=False | 缺键 {len(missing)} / 多余键 {len(unexpected)}）")
     if bool(cfg.get("freeze_backbone", False)):
         for p in model.parameters():
             p.requires_grad_(False)
@@ -295,7 +393,7 @@ def main():
     for epoch in range(1, epochs + 1):
         queue_z, queue_labels = train_one_epoch(
             model, sampler, train_loader, optimizer, scheduler, cfg, device,
-            epoch, queue_z, queue_labels, proj, writer)
+            epoch, queue_z, queue_labels, proj, writer, geo_loader)
         ckpt = os.path.join(save_dir, f"{cfg.get('name', 'aura')}_e{epoch}.pth")
         torch.save(model.state_dict(), ckpt)
         print(f"  已保存: {ckpt}")

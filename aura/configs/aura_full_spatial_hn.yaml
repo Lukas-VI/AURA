@@ -1,0 +1,72 @@
+# AURA · I-best + 同视频难负样本配对（H 轮 / 实验 2 的替代单变量）
+#
+# 为什么改这一条
+# --------------
+# 8 选 1 诊断（aura/runs/within_video.json）显示：在把候选集限制为"查询自己源视频的 8 帧"
+# 之后，I-best 59.67% 与零训练 r8_norm 60.00% 持平 —— 学习编码器在纯微小差异分辨上
+# 并未超过零训练。而标准协议的帧级 Top-1（59.675%）与 8 选 1 完全一致，说明跨视频几乎无错，
+# 全部损失都在"同视频挑对那一帧"。
+#
+# 假设：label_key=source_id 时正样本是"同一源帧的不同伪造方式"，而最难的负样本是同视频的
+# 相邻帧（背景逐像素相同、只有人脸微动）；均匀组采样下这两帧几乎不会同批出现，模型从未被
+# 要求区分它们。于是它学到的表征在视频级极强、在帧级只能追平零训练。
+#
+# 本配置唯一改动：hard_neg_pair=true —— 每批固定取同一条视频的两个不同源帧（各 2 张，
+# batch 仍为 4），让最难的负样本必然进批。其余超参与 I-best 逐项相同，便于逐 epoch 对比。
+#
+# 用法（项目根目录 d:\py\AURA 下）：
+#   E:\conda\envs\pytorch\python.exe -m aura.train --config aura/configs/aura_full_spatial_hn.yaml
+name: 'aura_full_spatial_hn'
+
+# ---------- 数据 ----------
+image_size: 256
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（论文原设 + 单编码器，与 I-best 相同） ----------
+embed_dim: 2048
+base_channels: 64
+num_branches: 5
+num_rb: 5
+num_scales: 2
+aff_channels: 512
+grad_checkpoint: false
+
+# ---------- 空间保留嵌入头（与 I-best 相同）----------
+spatial_head: true
+pool_grid: 8
+
+# ---------- 对比学习 ----------
+groups_per_batch: 2        # hard_neg_pair 下 = 1 条视频 × 2 个源帧（每帧 2 张）
+samples_per_group: 2
+queue_size: 4096
+label_key: 'source_id'     # 帧级标签：同一源帧的不同伪造方式互为正样本
+tau: 0.2
+lambda_vicreg: 1.0
+hard_neg_pair: true        # 本轮唯一改动：同视频两帧固定同批，构造帧级难负样本
+
+# ---------- 人脸掩膜擦除（关闭，与 I-best 相同）----------
+erase_prob: 0.0
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'
+use_multiscale_skip: false
+
+# ---------- 训练（与 I-best 逐项相同）----------
+steps_per_epoch: 800
+epochs: 3
+lr: 0.00002
+weight_decay: 0.0001
+warmup_ratio: 0.4
+amp: false
+cudnn_benchmark: false
+clip_grad_norm: 5.0
+num_workers: 0
+eval_batch_size: 4
+log_interval: 20
+eval_every_epoch: 1
+degradation_eval: 'none'
+
+# ---------- 保存 / 日志 ----------
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'

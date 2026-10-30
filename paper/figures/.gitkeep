@@ -1,0 +1,2 @@
+# 论文插图目录：把 PDF/PNG/EPS 图放在这里，正文用 \includegraphics{文件名} 引用
+# （preamble.tex 已设 \graphicspath{{figures/}}，故不用写路径）

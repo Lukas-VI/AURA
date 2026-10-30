@@ -3,6 +3,8 @@
 > 版本：v2（2026-10-15）
 > 依据：基线全量训练 + 检索/检测实测 + arXiv 查新
 > 关联代码：[train\_baseline.py](file:///d:/py/AURA/baseline/train_baseline.py)、[test\_baseline.py](file:///d:/py/AURA/baseline/test_baseline.py)、[models/hashvae.py](file:///d:/py/AURA/baseline/models/hashvae.py)
+>
+> **注（2026-10-20）**：本文件是 **pre-AURA 的规划 / 评估稿**（v2 停在 2026-10-15），文中读数为早期 **128px 基线档**（历史有效，未回改）。项目随后转入自建线 `aura/`，已跑完 A–K2 共 11 轮 + 一轮方案 B 两阶段重排器。**当前现状、关键读数与待决问题以 [AURA_HANDOFF.md](file:///d:/py/AURA/docs/AURA_HANDOFF.md) 为准**；本文的 §0 结论摘要与 idea 调研作为历史规划依据保留。
 
 ***
 

@@ -159,6 +159,12 @@ def main():
     ap.add_argument("--ransac_thresh", type=float, default=5.0, help="RANSAC 重投影阈值（像素）")
     ap.add_argument("--min_good", type=int, default=4, help="触发 RANSAC 的最少好匹配数")
     ap.add_argument("--levels", default="", help="逗号分隔档位子集；空=clean+全部 GEOM_LEVELS")
+    ap.add_argument("--dump_pred", default="", help="非空则把逐查询 top-1 预测存成 npz（配对显著性检验用）")
+    ap.add_argument("--dump_k", type=int, default=20, help="--dump_pred 采用的 K（默认 20，与报告口径一致）")
+    ap.add_argument("--fake_deg_cache", default="",
+                    help="非空则把伪造查询帧换成该目录下 index.json 指向的【离线退化缓存】"
+                         "（P1-4 真实传播链：先由 _build_h264_cache.py 过一遍 H.264 编解码）；"
+                         "图库保持干净原帧，SIFT 侧因此与 AURA 侧完全同口径")
     args = ap.parse_args()
 
     cfg = load_config(os.path.abspath(args.config))
@@ -172,6 +178,11 @@ def main():
     fake = [s for s in index["test"] if s["kind"] == "fake"]
     if args.n_query and args.n_query < len(fake):
         fake = random.Random(0).sample(fake, args.n_query)          # 固定种子 -> 各档查询集一致
+    if args.fake_deg_cache:
+        with open(os.path.join(os.path.abspath(args.fake_deg_cache), "index.json"), encoding="utf-8") as f:
+            _mp = json.load(f)
+        fake = [dict(s, path=_mp[s["id"]]) if s["id"] in _mp else s for s in fake]
+        print(f"[deg] 伪造查询换成离线退化缓存：{args.fake_deg_cache}（{len(_mp)} 条映射）", flush=True)
 
     det = detector(args.detector)
     matcher = make_matcher(args.detector)
@@ -212,6 +223,7 @@ def main():
     # ---------- 逐档评测 ----------
     out = {"n_db": len(db_src), "n_query": len(fake), "prefilter": args.prefilter,
            "ks": KS, "detector": args.detector, "size": size, "levels": {}}
+    dump = {}
     print("\n" + "=" * 128)
     print(f"{'档位':>10} | {'K':>5} | {'初筛单独T1/T5':>17} | {'recall@K':>9} | "
           f"{'几何重排T1':>11} {'T5':>8} | {'重排@1|候选内':>13} | {'good/内点':>11}")
@@ -270,6 +282,13 @@ def main():
                     if q_src[i] in ranked_src[:1]:
                         in_cand_hit1 += 1
             n = len(q_src)
+            if args.dump_pred and k == args.dump_k:          # 逐查询 top-1 预测（配对检验用）
+                _preds = []
+                for i in range(n):
+                    _s = all_scores[i][:k]
+                    _o = sorted(range(len(_s)), key=lambda t: (-_s[t][0], -_s[t][1]))
+                    _preds.append(db_src[cand[i, :k][_o][0]])
+                dump[lvl] = np.array(_preds, dtype=str)
             gm = float(np.mean([np.median([g for _, g in all_scores[i][:k]]) for i in range(n)]))
             im = float(np.mean([np.median([inl for inl, _ in all_scores[i][:k]]) for i in range(n)]))
             print(f"{lvl:>10} | {k:>5} | {alone_t1 * 100:7.2f}%/{alone_t5 * 100:6.2f}% | "
@@ -289,6 +308,9 @@ def main():
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
     print(f"[save] {args.out}")
+    if args.dump_pred:
+        np.savez_compressed(args.dump_pred, q_src=q_src.astype(str), **dump)
+        print(f"[dump] {args.dump_pred} | 档位 {list(dump)} | n={len(q_src)}")
 
 
 if __name__ == "__main__":

@@ -39,6 +39,10 @@ dumps/
 # ---------- 可视化图（内含数据集人脸图像，不随仓库分发） ----------
 baseline/results/*.png
 
+# ---------- LaTeX 论文：只跟踪源文件，编译产物不入库 ----------
+paper/build/*
+!paper/build/.gitkeep
+
 # ---------- 编辑器 / 系统 ----------
 .idea/
 .vscode/
@@ -46,3 +50,5 @@ baseline/results/*.png
 Thumbs.db
 .DS_Store
 baseline/cache/masks/554566330270611320ec540bd342bb6e.npy
+_ppt_build/
+aura/runs/*.py

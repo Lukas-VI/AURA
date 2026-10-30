@@ -1,0 +1,90 @@
+# AURA 自建单编码器 · K 轮：可微几何验证模块【进网络】+ 联合训练（端到端）
+# 用法（项目根目录 d:\py\AURA 下）：
+#   E:\conda\envs\pytorch\python.exe -m aura.train --config aura/configs/aura_full_geo_k.yaml
+#
+# 本轮要回答的问题：把可微几何验证模块（aura/geo.py：软互匹配 -> 可微 DLT -> 软内点）作为
+# 【网络内部的一条支路】与检索头联合训练，全档 T1 会不会被"几何一致性监督"抬起来？
+#   不是外挂重排器：推理路径只走全局嵌入，几何支路只在训练期提供梯度（设计已与用户确认）。
+#
+# 结构：I 轮主干（spatial_head，2048 维全局嵌入）之上新增【局部描述子头】local_head，
+#   它挂在【共享主干 conv0 -> scales[0]】之后（3 层 stride=2，256px -> 32×32 网格），
+#   因此 L_geo 的梯度能经共享参数回传到检索表征。
+# 损失：L = SupCon(全局) + λ_vicreg·var + λ_geo·L_geo。
+#   L_geo 用真实检索对：同 source_id 组内「干净真帧(参考) ↔ 同组随机几何退化的伪造帧(查询)」
+#   为正对、批内错位的异源真帧为负对；分数走网内可微几何模块（全链无 SIFT/RANSAC 不可微算子）。
+# 对照（同一主干的 I-best）：clean 59.67 / crop0.8 21.70 / crop0.7off 7.98 / rot10 32.71。
+#   注意 I 轮自身 e2=58.71、e3=57.86（继续训会掉）—— "从 I-best 再训 1 epoch 但不加几何" 的
+#   等价参照就是这条轨迹，故 K 轮跑 1 epoch 即可给出方向性判断。
+name: 'aura_full_geo_k'
+
+# ---------- 数据 ----------
+image_size: 256
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（I 轮主干 + K 轮局部描述子头）----------
+embed_dim: 2048
+base_channels: 64
+num_branches: 5
+num_rb: 5
+num_scales: 2
+aff_channels: 512
+spatial_head: true
+pool_grid: 8                # 8×8×32 = 2048
+local_head: true            # K 轮新增：共享主干早期特征 -> 逐位置 L2 归一化描述子
+local_dim: 32               # 描述子维度（与 _train_local_desc.py 的 32 对齐）
+local_width: 32
+# 本轮【开】梯度检查点：几何支路每步额外前向 conv0+scales[0]（256px 多分支残差块是大头），
+# 关掉会让峰值逼近 22GB 上限。梯度数值等价，只是 +25~30% 算力。
+grad_checkpoint: true
+
+# ---------- 可微几何一致性（K 轮核心）----------
+geo: true
+geo_size: 256               # 几何支路输入尺寸（= 主干输入，网格 = size/8 = 32）
+geo_batch: 4                # 每步几何对数（查询+参考共 8 张过 conv0+scales[0]）
+geo_temp: 0.05              # 软互最近邻 softmax 温度
+geo_sigma: 0.08             # 软内点尺度（归一化坐标）
+geo_margin: 0.3             # 铰链 margin（正对分数要比负对高 margin）
+lambda_geo: 1.0             # 几何一致性损失权重
+geo_max_deg: 12.0           # 查询侧随机几何退化：旋转 ±deg
+geo_smin: 0.7
+geo_smax: 1.3
+geo_max_shift: 0.08         # 平移幅度（归一化坐标）
+geo_cmin: 0.7               # 随机裁剪比例下限（含非中心）
+
+# ---------- 对比学习（与 I 轮逐项相同）----------
+groups_per_batch: 2
+samples_per_group: 2       # batch = 4
+queue_size: 4096
+label_key: 'source_id'
+tau: 0.2
+lambda_vicreg: 1.0
+
+# ---------- 人脸掩膜擦除（关闭）----------
+erase_prob: 0.0
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'
+use_multiscale_skip: false
+geom_aug: true
+
+# ---------- 训练 ----------
+steps_per_epoch: 800
+epochs: 1                   # K 轮先跑 1 epoch 看方向；有增益再拉到 6
+lr: 0.00002                 # 与 I 轮同（在 I-best 上继续微调，峰值不宜更高）
+weight_decay: 0.0001
+warmup_ratio: 0.4
+amp: false
+cudnn_benchmark: false
+clip_grad_norm: 5.0
+num_workers: 0
+eval_batch_size: 4
+log_interval: 20
+eval_every_epoch: 1
+degradation_eval: 'none'    # 七档几何由 aura/runs/_eval_geom_model.py 单独跑
+# 从 I-best 热启动：strict=False（local_head.* 是新键，随机初始化；骨干完整载入）。
+init_ckpt: 'D:/py/AURA/aura/runs/aura_full_spatial_i_best.pth'
+
+# ---------- 保存 / 日志 ----------
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'

@@ -35,7 +35,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from aura.encoder import LocalDescriptor
+from aura.encoder import build_local_descriptor
 from baseline.data.dataset import build_ffpp_index
 from baseline.utils import get_device, load_config
 
@@ -44,11 +44,18 @@ DEFAULT_OUT = "D:/py/AURA/aura/runs/local_desc.pth"
 
 
 class RealFrames(Dataset):
-    """train split 真实帧：读图 -> resize -> RGB -> [0,1] 张量（描述子训练用真图）。"""
+    """train split 真实帧：读图 -> resize -> RGB -> [0,1] 张量（描述子训练用真图）。
 
-    def __init__(self, samples, size: int):
+    photo_prob > 0 时对【同一张图】先做一次随机光度退化，再交给几何变形分支。
+    两个视图来自同一张退化图，对应关系不变，因此学的是"退化前后描述子仍能对应"——
+    这正是查询端（JPEG/模糊/低分辨率）与图库端（干净）错配时需要的性质。
+    """
+
+    def __init__(self, samples, size: int, photo_prob: float = 0.0, photo_mode: str = "mixed"):
         self.samples = list(samples)
         self.size = int(size)
+        self.photo_prob = float(photo_prob)
+        self.photo_mode = photo_mode
 
     def __len__(self):
         return len(self.samples)
@@ -57,7 +64,37 @@ class RealFrames(Dataset):
         bgr = cv2.imread(self.samples[i]["path"], cv2.IMREAD_COLOR)
         bgr = cv2.resize(bgr, (self.size, self.size), interpolation=cv2.INTER_AREA)
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        if self.photo_prob > 0 and random.random() < self.photo_prob:
+            rgb = photo_degrade(rgb, self.photo_mode)
         return torch.from_numpy(np.ascontiguousarray(rgb.transpose(2, 0, 1))).float().div_(255.0)
+
+
+def photo_degrade(rgb: np.ndarray, mode: str = "mixed") -> np.ndarray:
+    """随机光度退化（与查询端档位同源）：JPEG / 高斯模糊 / 噪声 / 降采样 / 亮度对比度。
+
+    mode="jpeg" 只做 JPEG，且质量限制在 15~45：目的是补 jpeg5 这一格的失效，同时避免
+    把模糊/噪声也塞进来——上一轮 photo_prob=0.7（含全部退化）把 clean 拉低了 1.4pp。
+    """
+    h, w = rgb.shape[:2]
+    if mode == "jpeg":
+        ok, buf = cv2.imencode(".jpg", rgb, [int(cv2.IMWRITE_JPEG_QUALITY), random.randint(15, 45)])
+        return cv2.imdecode(buf, cv2.IMREAD_COLOR) if ok else rgb
+    op = random.choice(("jpeg", "blur", "noise", "down", "bright"))
+    if op == "jpeg":
+        q = random.randint(5, 50)
+        ok, buf = cv2.imencode(".jpg", rgb, [int(cv2.IMWRITE_JPEG_QUALITY), q])
+        return cv2.imdecode(buf, cv2.IMREAD_COLOR) if ok else rgb
+    if op == "blur":
+        return cv2.GaussianBlur(rgb, (0, 0), random.uniform(0.5, 3.0))
+    if op == "noise":
+        n = np.random.normal(0.0, random.uniform(2.0, 12.0), rgb.shape)
+        return np.clip(rgb.astype(np.float32) + n, 0, 255).astype(np.uint8)
+    if op == "down":
+        side = random.choice((64, 96, 128))
+        small = cv2.resize(rgb, (side, side), interpolation=cv2.INTER_AREA)
+        return cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
+    alpha, beta = random.uniform(0.7, 1.3), random.uniform(-25, 25)
+    return np.clip(rgb.astype(np.float32) * alpha + beta, 0, 255).astype(np.uint8)
 
 
 def base_grid(h, w, device):
@@ -113,6 +150,10 @@ def main():
     ap.add_argument("--dim", type=int, default=32)
     ap.add_argument("--width", type=int, default=32)
     ap.add_argument("--depth", type=int, default=3, help="stride=2 的层数；网格 = size / 2**depth")
+    ap.add_argument("--backbone", default="tiny",
+                    help="局部描述子主干：tiny = 自建 11K 网络；resnet18 = ImageNet 预训练浅层")
+    ap.add_argument("--trunk_lr", type=float, default=0.0,
+                    help="resnet18 主干的学习率；0 = 冻结主干只训 1×1 投影")
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--tau", type=float, default=0.1, help="InfoNCE 温度")
     ap.add_argument("--max_deg", type=float, default=15.0, help="随机旋转幅度（±度）")
@@ -120,6 +161,10 @@ def main():
     ap.add_argument("--smax", type=float, default=1.25)
     ap.add_argument("--max_t", type=float, default=0.15, help="随机平移幅度（归一化坐标）")
     ap.add_argument("--log_every", type=int, default=100)
+    ap.add_argument("--photo_prob", type=float, default=0.0,
+                    help="每张图先做随机光度退化的概率（JPEG/模糊/噪声/降采样/亮度）")
+    ap.add_argument("--photo_mode", default="mixed", choices=["mixed", "jpeg"],
+                    help="mixed=全部退化类型；jpeg=只做 JPEG(q15~45)，专补极端压缩档")
     ap.add_argument("--json", default="D:/py/AURA/aura/runs/local_desc_train.json")
     args = ap.parse_args()
 
@@ -131,18 +176,30 @@ def main():
     dev = get_device(cfg)
     index = build_ffpp_index(cfg)
     reals = [s for s in index["train"] if s["kind"] == "real"]
+    stride = 4 if args.backbone == "resnet18" else 2 ** args.depth
     print(f"device={dev} | train reals {len(reals)} | size={args.size} | dim={args.dim} | "
-          f"grid={args.size // (2 ** args.depth)}² | steps={args.steps} | bs={args.bs}", flush=True)
+          f"grid={args.size // stride}² | steps={args.steps} | bs={args.bs} | "
+          f"backbone={args.backbone} | photo_prob={args.photo_prob}", flush=True)
 
-    ds = RealFrames(reals, args.size)
+    ds = RealFrames(reals, args.size, photo_prob=args.photo_prob, photo_mode=args.photo_mode)
     loader = DataLoader(ds, batch_size=args.bs, shuffle=True, num_workers=0, drop_last=True)
 
-    model = LocalDescriptor(dim=args.dim, width=args.width, depth=args.depth).to(dev)
-    n_par = sum(p.numel() for p in model.parameters())
-    print(f"描述子网络参数 {n_par / 1e3:.0f}K", flush=True)
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    model = build_local_descriptor(args.backbone, dim=args.dim, width=args.width,
+                                   depth=args.depth,
+                                   train_trunk=args.trunk_lr > 0).to(dev)
+    n_par = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"描述子网络可训参数 {n_par / 1e3:.0f}K "
+          f"（总 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M）", flush=True)
+    head = [p for n, p in model.named_parameters()
+            if p.requires_grad and not n.startswith(("conv1", "bn1", "layer1", "layer2"))]
+    groups = [{"params": head, "lr": args.lr}]
+    trunk = [p for n, p in model.named_parameters()
+             if p.requires_grad and n.startswith(("conv1", "bn1", "layer1", "layer2"))]
+    if trunk:
+        groups.append({"params": trunk, "lr": args.trunk_lr})
+    opt = torch.optim.Adam(groups, lr=args.lr)
 
-    g = args.size // (2 ** args.depth)
+    g = args.size // model.grid_stride
     coords = base_grid(g, g, dev)                       # (g,g,2) 原图位置（描述子网格中心）
     coords_flat = coords.reshape(-1, 2)                 # (N,2)
 
@@ -185,7 +242,8 @@ def main():
     print(f"[save] {args.out}")
     with open(args.json, "w", encoding="utf-8") as f:
         json.dump({"steps": args.steps, "bs": args.bs, "size": args.size, "dim": args.dim,
-                   "depth": args.depth, "tau": args.tau, "loss_first": losses[0],
+                   "depth": args.depth, "backbone": args.backbone, "tau": args.tau,
+                   "loss_first": losses[0],
                    "loss_last": losses[-1], "loss_mean_last100": float(np.mean(losses[-100:])),
                    "params": n_par}, f, ensure_ascii=False, indent=2)
     print(f"[loss] 首步 {losses[0]:.4f} -> 末步 {losses[-1]:.4f} | 末 100 步均值 {np.mean(losses[-100:]):.4f}")

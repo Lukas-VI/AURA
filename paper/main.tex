@@ -1,0 +1,34 @@
+% ============================================================
+% AURA 论文 —— 路线 B：benchmark / 分析论文框架
+% 中文初稿（ctexart + xelatex）。定稿转投英文期刊时，把 ctexart 换成 article 并逐节翻译即可。
+%
+% 编译（项目根目录 d:\py\AURA 下）：
+%     powershell -ExecutionPolicy Bypass -File paper\build.ps1
+% 或直接在 paper/ 下：
+%     latexmk -xelatex -outdir=build -auxdir=build main.tex
+% 编译产物（*.pdf / *.aux / *.log ...）统一落在 paper/build/。
+% ============================================================
+\documentclass[11pt,a4paper]{ctexart}
+
+\input{preamble}
+
+\title{AURA：以背景为来源指纹的深度伪造溯源\\[1mm]
+       {\large ——任务刻画、真帧级协议与可微几何验证}}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\input{sections/0_abstract}
+\input{sections/1_introduction}
+\input{sections/2_related}
+\input{sections/3_task}
+\input{sections/4_method}
+\input{sections/5_experiments}
+\input{sections/6_discussion}
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

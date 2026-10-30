@@ -1,0 +1,66 @@
+# AURA · 闭环：让检索编码器自己产出 32×32 局部场，替代外挂 LocalDescriptor
+#
+# 背景（runs/within_video_ablate.json）：
+#   8×8 上把全局内积换成逐位置比较无效（60.29 对 60.14，match 57.39）；
+#   同一几何模块在 32×32 / 16×16 / 8×8 上为 66.25 / 61.71 / 57.76。
+#   => 收益来自"细网格 + 对应"，而外挂描述子不受检索主干约束。
+#
+# 本配置 = aura_full_spatial_grid.yaml + local_head，只用于：
+#   1) _preheat_local_head.py 在【冻结主干】上自监督预热 local_head；
+#   2) _eval_within_video.py --variants encgeo 用网内局部场做 8 选 1 重排。
+# 不用于训练检索嵌入（grid_contrast 等保持原样，便于追溯）。
+name: 'aura_full_spatial_grid_self'
+
+# ---------- 数据 ----------
+image_size: 256
+num_train_videos: 300
+num_val_videos: 100
+num_test_videos: 200
+seed: 42
+
+# ---------- 模型（与 grid 轮相同，另加 local_head） ----------
+embed_dim: 2048
+base_channels: 64
+num_branches: 5
+num_rb: 5
+num_scales: 2
+aff_channels: 512
+grad_checkpoint: false
+
+spatial_head: true
+pool_grid: 8
+
+# 网内局部描述子头：3 层 stride=2 -> 256px 下 32×32 网格，与 LocalDescriptor 同构
+local_head: true
+local_dim: 32
+local_width: 32
+
+# ---------- 对比学习（与原配置一致，仅用于建模索引） ----------
+groups_per_batch: 2
+samples_per_group: 2
+queue_size: 4096
+label_key: 'source_id'
+tau: 0.2
+lambda_vicreg: 1.0
+grid_contrast: false
+
+erase_prob: 0.0
+mask_cache_dir: 'D:/py/AURA/baseline/cache/masks'
+use_multiscale_skip: false
+
+steps_per_epoch: 800
+epochs: 1
+lr: 0.00002
+weight_decay: 0.0001
+warmup_ratio: 0.4
+amp: false
+cudnn_benchmark: false
+clip_grad_norm: 5.0
+num_workers: 0
+eval_batch_size: 4
+log_interval: 20
+eval_every_epoch: 0
+degradation_eval: 'none'
+
+save_dir: 'D:/py/AURA/aura/runs'
+log_dir: 'D:/py/AURA/aura/runs/tb'

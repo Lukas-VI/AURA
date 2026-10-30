@@ -1,0 +1,132 @@
+<mxfile host="app.diagrams.net" modified="2026-10-29T00:00:00.000Z" agent="AURA" version="24.7.17" type="device">
+  <diagram id="fig4-structure" name="fig4_structure">
+    <mxGraphModel dx="1300" dy="900" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1300" pageHeight="870" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="gL" value="全局编码器（检索初筛，I-best）" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f7f9fc;strokeColor=#b0b8c4;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4;fontSize=12;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="30" y="80" width="520" height="700" as="geometry" />
+        </mxCell>
+        <mxCell id="gR" value="局部描述子（重排供给）" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#fbf7f2;strokeColor=#c4b0a0;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4;fontSize=12;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="600" y="80" width="670" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="gG" value="融合、几何校验与打分" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f6f6fa;strokeColor=#a8a8c4;verticalAlign=top;align=left;spacingLeft=10;spacingTop=4;fontSize=12;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="600" y="400" width="670" height="350" as="geometry" />
+        </mxCell>
+        <mxCell id="inp" value="输入 256×256×3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="150" y="20" width="220" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="conv0" value="conv0：3×3，3→64" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="150" y="100" width="220" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="st0" value="Stage 0：MultiBranchBlock&#10;64 ch，M=5 分支 × D=5 残差块，256×256" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="110" y="165" width="300" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="dsc" value="Downsample：3×3，s2，64→128" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="150" y="255" width="220" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="st1" value="Stage 1：MultiBranchBlock&#10;128 ch，M=5 分支 × D=5 残差块，128×128" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="110" y="320" width="300" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="aff" value="AFF 多尺度注意力融合&#10;512 ch @ 256×256（全段 fp32）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="110" y="410" width="300" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pool" value="空间池化头（保留布局）&#10;Conv3×3 512 → 1×1 512→32&#10;→ AvgPool 8×8 → flatten 2048" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="90" y="500" width="340" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="head" value="Head：LayerNorm → Linear(2048→2048) → BatchNorm1d" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="90" y="595" width="340" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="z" value="z_global ∈ R^2048（L2 归一化后按余弦排序）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="90" y="675" width="340" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="A" value="局部头 A（tiny，与主干共享早期特征）&#10;Conv3×3 s2 64ch ×2 → 1×1 → dim 64" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="620" y="115" width="310" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="Aout" value="描述子场 A：64×64×64&#10;逐位置 L2 归一化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="620" y="205" width="310" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="B" value="局部头 B（ResNet18 浅层，主干冻结）&#10;conv1+maxpool → layer1 64ch@64²&#10;layer2 128ch@32² → 上采样 → concat 192 → 1×1→32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=9;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="950" y="115" width="310" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="Bout" value="描述子场 B：64×64×32&#10;逐位置 L2 归一化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="950" y="205" width="310" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="fuse" value="z-score 融合（0.5 / 0.5）｜门控：一路批内 std&lt;0.10 时只用第二路" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="620" y="435" width="640" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="geo" value="可微几何校验&#10;软互最近邻 → 可微 DLT&#10;→ 软内点占比（σ=0.2）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="620" y="530" width="310" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="fb" value="几何回退：16×16 粗网格&#10;几何分 ∈[0.35,0.68) 时触发&#10;（固定阈值，非本次重标定）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="950" y="530" width="310" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="score" value="两阶段得分 → 候选内重排 → top-1 source_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="620" y="655" width="640" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="n1" value="训练：全局 = 监督对比损失（label=source_id，τ=0.2，XBM 4096）+ VICReg；局部 A = 合成仿射自监督 InfoNCE；局部 B = ImageNet 预训练、主干冻结" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#ffffff;strokeColor=#999999;fontSize=9;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="30" y="795" width="600" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n2" value="实现规模：12.81M 参数；输入 256×256，全局嵌入 2048 维；局部网格 64×64 = 4096 个位点；初筛 K=20" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#ffffff;strokeColor=#999999;fontSize=9;fontFamily=Microsoft YaHei;" vertex="1" parent="1">
+          <mxGeometry x="650" y="795" width="620" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ea" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="inp" target="conv0">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eb" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="conv0" target="st0">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ec" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="st0" target="dsc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ed" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="dsc" target="st1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ee" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="st1" target="aff">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ef" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="aff" target="pool">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eg" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="pool" target="head">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eh" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="head" target="z">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ei" value="共享早期特征（梯度可回传）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#d79b00;fontSize=9;fontFamily=Microsoft YaHei;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="st0" target="A">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="450" y="200" />
+              <mxPoint x="450" y="155" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ej" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#d79b00;" edge="1" parent="1" source="A" target="Aout">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ek" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#d79b00;" edge="1" parent="1" source="B" target="Bout">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="el" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="1" source="Aout" target="fuse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="em" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="1" source="Bout" target="fuse">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="en" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="1" source="fuse" target="geo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#9673a6;" edge="1" parent="1" source="fuse" target="fb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#333333;" edge="1" parent="1" source="geo" target="score">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eq2" value="回退分" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#9673a6;fontSize=9;fontFamily=Microsoft YaHei;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="fb" target="score">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
